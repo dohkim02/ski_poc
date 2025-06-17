@@ -5,8 +5,12 @@ usage_burner.json
 uploaded_data.txt
 .DS_Store
 __pycache__
-*.txt
 *.xlsx
 *.json
 *.csv
 *.jsonl
+# 모든 .txt 파일 무시
+*.txt
+
+# 예외적으로 이 파일만 포함
+!requirements.txt

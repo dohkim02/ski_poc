@@ -1,0 +1,12 @@
+.env
+venv/
+data/
+usage_burner.json
+uploaded_data.txt
+.DS_Store
+__pycache__
+*.txt
+*.xlsx
+*.json
+*.csv
+*.jsonl

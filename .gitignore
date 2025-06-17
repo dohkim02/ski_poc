@@ -15,3 +15,4 @@ __pycache__
 # 예외적으로 이 파일만 포함
 !requirements.txt
 !data2_biz_with_std.xlsx
+.streamlit/secrets.toml

@@ -3,9 +3,9 @@ import streamlit as st
 import pandas as pd
 import matplotlib.pyplot as plt
 import asyncio
-from _llm_judge_std import Analyze, save_results_to_txt  # 너가 작성한 클래스
-from utils import get_data_from_txt
-from _preprocess import preprocess_excel, excel_to_txt
+from poc2._llm_judge_std import Analyze, save_results_to_txt  # 너가 작성한 클래스
+from poc2.utils import get_data_from_txt
+from poc2._preprocess import preprocess_excel, excel_to_txt
 from model import initialize_llm
 
 # 페이지 설정

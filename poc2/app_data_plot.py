@@ -20,12 +20,10 @@ st.set_page_config(layout="wide", page_title="에너지 사용량 분석 도구"
 # 메인 타이틀
 st.title("📊 평균/표준편차를 고려한 이상치 탐지")
 
-
 # 데이터 파일 처리
-data_file_path = "./data2_biz_with_std.xlsx"
+data_file_path = os.path.join(os.path.dirname(__file__), "data2_biz_with_std.xlsx")
 
 uploaded_file = st.file_uploader("엑셀 파일 업로드 (.xlsx)", type=["xlsx"])
-
 
 # 이상치 분석 데이터 처리
 if "data_lst" not in st.session_state:
@@ -36,8 +34,8 @@ if "analysis_results" not in st.session_state:
 # 파일 전처리 (이상치 분석용)
 if uploaded_file is not None and st.session_state.data_lst is None:
     with st.spinner("📁 파일 처리 중..."):
-        input_path = "./uploaded.xlsx"
-        output_path = "./data2_preprocessed.xlsx"
+        input_path = os.path.join(os.path.dirname(__file__), "uploaded.xlsx")
+        output_path = os.path.join(os.path.dirname(__file__), "data2_preprocessed.xlsx")
 
         with open(input_path, "wb") as f:
             f.write(uploaded_file.read())
@@ -49,7 +47,11 @@ if uploaded_file is not None and st.session_state.data_lst is None:
         st.success("✅ 파일 전처리 완료")
 
 try:
-    df = pd.read_excel(data_file_path)
+    if os.path.exists(data_file_path):
+        df = pd.read_excel(data_file_path)
+    else:
+        st.warning("기본 데이터 파일을 찾을 수 없습니다. 엑셀 파일을 업로드해주세요.")
+        df = None
 
     # 그룹명 추정 (첫 번째 컬럼)
     group_col = df.columns[0]

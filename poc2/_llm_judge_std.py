@@ -17,8 +17,8 @@ class Analyze:
     def __init__(
         self,
         llm,
-        biz_gt_path="./_biz_group_gt.json",
-        usage_gt_path="./_usage_gt.json",
+        biz_gt_path=os.path.join(os.path.dirname(__file__), "_biz_group_gt.json"),
+        usage_gt_path=os.path.join(os.path.dirname(__file__), "_usage_gt.json"),
     ):
         self.llm = llm
         self._biz_gt = get_json(biz_gt_path)
@@ -176,7 +176,9 @@ def save_results_to_txt(output_path, results):
 # 사용 예시:
 async def main():
     llm = initialize_llm("langchain_gpt4o")
-    data_lst = get_data_from_txt("./preprocessed.txt")
+    data_lst = get_data_from_txt(
+        os.path.join(os.path.dirname(__file__), "preprocessed.txt")
+    )
 
     print(f"Total items to process: {len(data_lst)}")
 
@@ -193,11 +195,8 @@ async def main():
         for item in results
         if item["judge_result"].result == "이상"
     ]
-    # import pdb
 
-    # pdb.set_trace()
-    # results[0]["gt_data"]["그룹"]
-    output_path = "./llm_std_test.txt"
+    output_path = os.path.join(os.path.dirname(__file__), "llm_std_test.txt")
     output_path = save_results_to_txt(output_path, results)
     final_report = analyzer.reports_llm(outlier_data)
     return final_report

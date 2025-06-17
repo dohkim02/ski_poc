@@ -7,6 +7,8 @@ uploaded_data.txt
 __pycache__
 *.xlsx
 *.json
+!_biz_group_gt.json
+!_usage_gt.json
 *.csv
 *.jsonl
 # 모든 .txt 파일 무시

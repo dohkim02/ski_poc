@@ -8,3 +8,4 @@ langchain
 streamlit
 pydantic
 tqdm
+python-dotenv

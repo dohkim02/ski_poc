@@ -10,3 +10,4 @@ pydantic
 tqdm
 python-dotenv
 openai
+langchain_openai

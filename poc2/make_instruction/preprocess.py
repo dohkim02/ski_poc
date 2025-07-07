@@ -4,17 +4,34 @@ from datetime import datetime
 import json
 from concurrent.futures import ThreadPoolExecutor
 from utils import MonthlyAverageAnalyzer
+import os
+import sys
+from utils import get_exel_with_biz_lst
+
+data_path = os.path.abspath("../")  # 예: 한 단계 바깥 폴더
+sys.path.append(data_path)
 
 # 1️⃣ 데이터 로딩
-file_path = "../data/data2.xlsx"
+file_path = "../data2.xlsx"
 
 
+# 필요한 컬럼 데이터만 뽑기
 def preprocess_excel(file_path, output_path):
     # 1. 엑셀 파일 읽기
     df = pd.read_excel(file_path)
 
     # 2. 기본 컬럼 정의
-    base_cols = ["구분", "업태", "업종", "용도", "보일러 열량", "연소기 열량"]
+    base_cols = [
+        "구분",
+        "업태",
+        "업종",
+        "용도",
+        "보일러 대수",
+        "보일러 열량",
+        "연소기 대수",
+        "연소기 열량",
+        "열량",  # 새로운 열량 컬럼 추가
+    ]
 
     # 3. 시간 컬럼 판별 (datetime 형식)
     time_cols = [col for col in df.columns if isinstance(col, datetime)]
@@ -23,10 +40,23 @@ def preprocess_excel(file_path, output_path):
     df = df.dropna(subset=["업태", "업종"])
 
     # 5. 보일러, 연소기, 시간 컬럼 결측 → 0
-    fill_zero_cols = ["보일러 열량", "연소기 열량"] + time_cols
+    fill_zero_cols = [
+        "보일러 대수",
+        "보일러 열량",
+        "연소기 대수",
+        "연소기 열량",
+    ] + time_cols
     df[fill_zero_cols] = df[fill_zero_cols].fillna(0)
 
-    # 6. 사용량_패턴 생성 (월별 평균값 딕셔너리)
+    # 6. 열량 컬럼 생성: (보일러 대수 × 보일러 열량) + (연소기 대수 × 연소기 열량)
+    df["열량"] = (df["보일러 대수"] * df["보일러 열량"]) + (
+        df["연소기 대수"] * df["연소기 열량"]
+    )
+
+    # 7. 열량이 10000 미만인 행 제거
+    df = df[df["열량"] >= 10000]
+
+    # 8. 사용량_패턴 생성 (월별 평균값 딕셔너리)
     def get_monthly_avg(row):
         periods = [col.strftime("%y.%m") for col in time_cols]
         values = [row[col] for col in time_cols]
@@ -39,7 +69,7 @@ def preprocess_excel(file_path, output_path):
 
     df["사용량_패턴"] = df.apply(get_monthly_avg, axis=1)
 
-    # 7. 저장할 결과만 추출
+    # 9. 저장할 결과만 추출
     df_result = df[base_cols + ["사용량_패턴"]]
     df_result.to_excel(output_path, index=False)
 
@@ -47,10 +77,12 @@ def preprocess_excel(file_path, output_path):
     return output_path
 
 
+# 클러터링 할 청크 갯수 정하기
 def chunk_list(data_list, chunk_size=10):
     return [data_list[i : i + chunk_size] for i in range(0, len(data_list), chunk_size)]
 
 
+# 청크 데이터 쓰기
 def write_chunk_line(file_path, chunk, lock):
     line = json.dumps(chunk, ensure_ascii=False)
     # 스레드가 동시에 파일에 쓰지 않도록 락을 사용!
@@ -60,9 +92,7 @@ def write_chunk_line(file_path, chunk, lock):
 
 
 # 업태 업종 뽑고, 저장
-def excel_to_txt_chunks_parallel(
-    file_path, output_file="./test_chunks.txt", chunk_size=20
-):
+def get_category_list(file_path, output_file="./category_list.txt", chunk_size=10):
     import threading
 
     # 1️⃣ 엑셀 읽기
@@ -90,9 +120,17 @@ def excel_to_txt_chunks_parallel(
     return chunked_data
 
 
-# output_path = "./data2_preprocessed.xlsx"
+# output_path = "./preprocessed.xlsx"
 # preprocess_excel(file_path, output_path)
-# get_txt = excel_to_txt_chunks_parallel(output_path)
+# get_txt = get_category_list(output_path)
+
+
+# # 사용 예시
+# get_exel_with_biz_lst(
+#     txt_path="./clustering_result.txt",
+#     xlsx_path="./preprocessed.xlsx",
+#     output_path="./group_biz_with_12.xlsx",
+# )
 # # 결과 확인
 # print(df_result.head())
 # print(f"\n전처리 후 데이터 개수: {len(df_result)}")

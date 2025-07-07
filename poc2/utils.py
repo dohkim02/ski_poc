@@ -1,5 +1,6 @@
 import json
 import pandas as pd
+import ast
 
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -12,6 +13,20 @@ def get_json(path):
     with open(path, "r", encoding="utf-8") as f:
         data = json.load(f)
     return data
+
+
+def get_heat_input_gt(heat_input):
+
+    if 10000 <= heat_input < 50000:
+
+        return "10000~50000"
+
+    if 50000 <= heat_input < 100000:
+
+        return "50000~100000"
+    if heat_input >= 100000:
+
+        return "100000~"
 
 
 def extract_group_data(group_key: str, full_data: dict) -> dict:
@@ -53,16 +68,25 @@ class MonthlyAverageAnalyzer:
         return self.data
 
     def calculate_monthly_averages(self):
-        """월별 평균값 계산"""
-        self.monthly_averages = (
-            self.data.groupby("month")
-            .agg({"value": ["mean", "count", "std", "min", "max"]})
+        """월별 중위수값 계산 (median과 IQR 기준)"""
+        # 월별 그룹화하여 통계 계산
+        monthly_stats = (
+            self.data.groupby("month")["value"]
+            .agg(
+                [
+                    "median",  # 중위수
+                    "count",  # 개수
+                    lambda x: x.quantile(0.75) - x.quantile(0.25),  # IQR
+                    "min",  # 최소값
+                    "max",  # 최대값
+                ]
+            )
             .round(2)
         )
 
-        # 컬럼명 정리
-        self.monthly_averages.columns = ["average", "count", "std", "min", "max"]
-        self.monthly_averages = self.monthly_averages.reset_index()
+        # 컬럼명 정리 (기존 포맷 유지)
+        monthly_stats.columns = ["average", "count", "std", "min", "max"]
+        self.monthly_averages = monthly_stats.reset_index()
 
         # 월 이름 추가
         month_names = [
@@ -86,7 +110,7 @@ class MonthlyAverageAnalyzer:
         return self.monthly_averages
 
     def plot_monthly_averages(self, figsize=(12, 6), save_path=None):
-        """월별 평균값 시각화"""
+        """월별 중위수값 시각화"""
         if self.monthly_averages is None:
             self.calculate_monthly_averages()
 
@@ -108,8 +132,8 @@ class MonthlyAverageAnalyzer:
 
         # 그래프 스타일링
         ax.set_xlabel("월", fontsize=12)
-        ax.set_ylabel("평균값", fontsize=12)
-        ax.set_title("월별 평균값 트렌드", fontsize=14, fontweight="bold")
+        ax.set_ylabel("중위수값", fontsize=12)
+        ax.set_title("월별 중위수값 트렌드", fontsize=14, fontweight="bold")
         ax.grid(True, alpha=0.3)
 
         # x축 레이블
@@ -135,7 +159,7 @@ class MonthlyAverageAnalyzer:
         plt.show()
 
     def plot_comparison(self, figsize=(15, 8), save_path=None):
-        """원본 데이터와 월별 평균 비교 시각화"""
+        """원본 데이터와 월별 중위수 비교 시각화"""
         fig, (ax1, ax2) = plt.subplots(2, 1, figsize=figsize)
 
         # 원본 데이터 플롯
@@ -159,7 +183,7 @@ class MonthlyAverageAnalyzer:
             [self.data.iloc[i]["period"] for i in tick_indices], rotation=45
         )
 
-        # 월별 평균 플롯
+        # 월별 중위수 플롯
         ax2.plot(
             self.monthly_averages["month"],
             self.monthly_averages["average"],
@@ -168,9 +192,9 @@ class MonthlyAverageAnalyzer:
             markersize=8,
             color="#2563eb",
         )
-        ax2.set_title("월별 평균값", fontsize=12, fontweight="bold")
+        ax2.set_title("월별 중위수값", fontsize=12, fontweight="bold")
         ax2.set_xlabel("월")
-        ax2.set_ylabel("평균값")
+        ax2.set_ylabel("중위수값")
         ax2.grid(True, alpha=0.3)
         ax2.set_xticks(self.monthly_averages["month"])
         ax2.set_xticklabels([f"{m}월" for m in self.monthly_averages["month"]])
@@ -188,16 +212,19 @@ class MonthlyAverageAnalyzer:
             self.calculate_monthly_averages()
 
         summary = {
-            "최고_평균_월": self.monthly_averages.loc[
+            "최고_중위수_월": self.monthly_averages.loc[
                 self.monthly_averages["average"].idxmax(), "month_name"
             ],
-            "최고_평균값": self.monthly_averages["average"].max(),
-            "최저_평균_월": self.monthly_averages.loc[
+            "최고_중위수값": self.monthly_averages["average"].max(),
+            "최저_중위수_월": self.monthly_averages.loc[
                 self.monthly_averages["average"].idxmin(), "month_name"
             ],
-            "최저_평균값": self.monthly_averages["average"].min(),
-            "전체_평균": self.monthly_averages["average"].mean().round(2),
-            "표준편차": self.monthly_averages["average"].std().round(2),
+            "최저_중위수값": self.monthly_averages["average"].min(),
+            "전체_중위수": self.monthly_averages["average"].median().round(2),
+            "IQR": (
+                self.monthly_averages["average"].quantile(0.75)
+                - self.monthly_averages["average"].quantile(0.25)
+            ).round(2),
         }
 
         return summary
@@ -208,14 +235,14 @@ class MonthlyAverageAnalyzer:
             self.calculate_monthly_averages()
 
         print("=" * 50)
-        print("월별 평균값 분석 리포트")
+        print("월별 중위수값 분석 리포트")
         print("=" * 50)
 
         # 월별 상세 정보
         for _, row in self.monthly_averages.iterrows():
             print(
-                f"{row['month_name']:>3}: 평균 {row['average']:>6.2f} "
-                f"(개수: {row['count']:>2}, 표준편차: {row['std']:>6.2f})"
+                f"{row['month_name']:>3}: 중위수 {row['average']:>6.2f} "
+                f"(개수: {row['count']:>2}, IQR: {row['std']:>6.2f})"
             )
 
         print("-" * 50)
@@ -224,30 +251,6 @@ class MonthlyAverageAnalyzer:
         summary = self.get_summary_stats()
         for key, value in summary.items():
             print(f"{key.replace('_', ' ')}: {value}")
-
-
-#     # 분석 실행
-#     analyzer = MonthlyAverageAnalyzer()
-
-#     # 데이터 로드
-#     data = analyzer.load_data(periods, values)
-#     print("데이터 로드 완료")
-#     print(f"총 {len(data)}개 데이터 포인트")
-
-#     # 월별 평균 계산
-#     monthly_avg = analyzer.calculate_monthly_averages()
-#     print("\n월별 평균값 계산 완료")
-
-#     # 상세 리포트 출력
-#     analyzer.print_detailed_report()
-
-#     # 시각화
-#     analyzer.plot_monthly_averages()
-#     analyzer.plot_comparison()
-
-#     # CSV 저장 (선택사항)
-#     # monthly_avg.to_csv('monthly_averages.csv', index=False, encoding='utf-8-sig')
-#     # print("\n월별 평균값이 'monthly_averages.csv'에 저장되었습니다.")
 
 
 def get_data_from_txt(file_path):
@@ -269,6 +272,7 @@ def get_biz_lst(file_path):
 
 
 # 2. 엑셀 파일에 컬럼 추가
+# 그룹 컬럼이 포함된 엑셀 파일 생성
 def get_exel_with_biz_lst(txt_path, xlsx_path, output_path):
     # 분류 결과 불러오기
     categories = get_biz_lst(txt_path)
@@ -288,3 +292,105 @@ def get_exel_with_biz_lst(txt_path, xlsx_path, output_path):
     # 저장
     df.to_excel(output_path, index=False)
     print(f"✅ 새로운 파일이 저장되었습니다: {output_path}")
+
+
+import json
+
+
+def find_group_usage_combination(data, target_heat_range, target_group, target_usage):
+    """
+    JSON 파일에서 특정 그룹, 용도, 열량범위 조합을 찾는 함수
+
+    Args:
+        target_group: 찾고자 하는 그룹명 (예: '제조업')
+        target_usage: 찾고자 하는 용도명 (예: '일반용1')
+        target_heat_range: 찾고자 하는 열량범위 (예: '10000~50000', 선택적)
+
+    Returns:
+        list: 매칭되는 인덱스들의 리스트
+    """
+    groups = data["그룹"]
+    usages = data["용도"]
+
+    # 1. 그룹에서 target_group과 일치하는 인덱스들 찾기
+    group_indices = []
+    for index, group in groups.items():
+        if group == target_group:
+            group_indices.append(index)
+
+    # 2. 용도에서 target_usage와 일치하는 인덱스들 찾기
+    usage_indices = []
+    for index, usage in usages.items():
+        if usage == target_usage:
+            usage_indices.append(index)
+
+    # 3. 열량범위가 지정된 경우 열량범위도 확인
+    heat_indices = []
+    if target_heat_range and "열량범위" in data:
+        heat_ranges = data["열량범위"]
+        for index, heat_range in heat_ranges.items():
+            if heat_range == target_heat_range:
+                heat_indices.append(index)
+
+    # 4. 교집합 구하기
+    if target_heat_range and heat_indices:
+        # 열량범위가 지정되고 데이터에 열량범위가 있는 경우 3개 조건 모두 만족
+        matching_indices = list(
+            set(group_indices) & set(usage_indices) & set(heat_indices)
+        )
+    else:
+        # 열량범위가 지정되지 않았거나 데이터에 열량범위가 없는 경우 기존 방식
+        matching_indices = list(set(group_indices) & set(usage_indices))
+
+    return matching_indices
+
+
+def get_group_usage_info(data, target_heat_range, target_group, target_usage):
+    """
+    특정 그룹, 용도, 열량범위 조합의 모든 정보를 반환하는 함수
+
+    Args:
+        data: JSON 데이터
+        target_group: 찾고자 하는 그룹명
+        target_usage: 찾고자 하는 용도명
+        target_heat_range: 찾고자 하는 열량범위
+    """
+    matching_indices = find_group_usage_combination(
+        data, target_heat_range, target_group, target_usage
+    )
+
+    if not matching_indices:
+        heat_info = f", 열량범위: '{target_heat_range}'" if target_heat_range else ""
+        return f"'{target_group}', '{target_usage}'{heat_info} 조합을 찾을 수 없습니다."
+
+    results = []
+    for index in matching_indices:
+        result_item = {
+            "index": index,
+            "group": data["그룹"][index],
+            "usage": data["용도"][index],
+            "data_num": data["데이터 개수"][index],
+        }
+        # 열량범위 정보가 있으면 추가
+        if "열량범위" in data:
+            result_item["heat_range"] = data["열량범위"][index]
+        results.append(result_item)
+
+    # 카테고리 정보 생성
+    category_parts = [results[0]["group"], results[0]["usage"]]
+    if "heat_range" in results[0]:
+        category_parts.insert(0, results[0]["heat_range"])
+    category = "(" + ", ".join(category_parts) + ")"
+    data_num = results[0]["data_num"]
+
+    return {
+        "category": category,
+        "median": data["사용량 패턴 기준값"][results[0]["index"]],
+        "data_num": data_num,
+    }
+
+    # return {
+    #     "category": category,
+    #     "median": data["사용량 패턴 중앙값"][results[0]["index"]],
+    #     "data_num": data_num,
+    # }

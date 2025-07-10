@@ -1,3 +1,4 @@
+# File version: 2.1 - Fixed group_index.json path resolution for Streamlit Cloud
 from pydantic import BaseModel, Field, model_validator
 from typing import Literal, Optional
 from langchain_core.prompts import PromptTemplate
@@ -35,36 +36,53 @@ class Analyze:
     ):
         self.llm = llm
 
-        # 여러 가능한 경로들을 시도
+        # 더 간단하고 직접적인 방법으로 경로 찾기
         if ground_truth_path is None:
-            possible_paths = [
-                os.path.join(
-                    os.path.dirname(__file__), "make_instruction", "group_index.json"
-                ),
-                os.path.join(os.getcwd(), "make_instruction", "group_index.json"),
-                os.path.join(
-                    os.path.dirname(__file__),
-                    "..",
-                    "poc2",
-                    "make_instruction",
-                    "group_index.json",
-                ),
-                "make_instruction/group_index.json",
-                "./make_instruction/group_index.json",
-            ]
+            # Streamlit Cloud 환경을 고려한 경로
+            import streamlit as st
 
-            ground_truth_path = None
-            for path in possible_paths:
-                if os.path.exists(path):
-                    ground_truth_path = path
-                    print(f"Found group_index.json at: {path}")
-                    break
+            # 현재 파일 기준으로 상대 경로 구성
+            current_dir = os.path.dirname(os.path.abspath(__file__))
+            ground_truth_path = os.path.join(
+                current_dir, "make_instruction", "group_index.json"
+            )
 
-            if ground_truth_path is None:
-                raise FileNotFoundError(
-                    f"group_index.json not found. Tried paths: {possible_paths}"
-                )
+            print(f"Trying primary path: {ground_truth_path}")
 
+            # 파일이 존재하지 않으면 다른 경로들 시도
+            if not os.path.exists(ground_truth_path):
+                print(f"Primary path not found, trying alternatives...")
+
+                alternative_paths = [
+                    "/mount/src/ski_poc/poc2/make_instruction/group_index.json",
+                    os.path.join(os.getcwd(), "make_instruction", "group_index.json"),
+                    "make_instruction/group_index.json",
+                ]
+
+                for alt_path in alternative_paths:
+                    print(f"Trying: {alt_path}")
+                    if os.path.exists(alt_path):
+                        ground_truth_path = alt_path
+                        print(f"SUCCESS: Found at {alt_path}")
+                        break
+                else:
+                    # 모든 경로 실패시 디렉토리 내용 확인
+                    print(f"Current directory: {os.getcwd()}")
+                    print(f"Current file directory: {current_dir}")
+                    try:
+                        print(f"Contents of current dir: {os.listdir('.')}")
+                        if os.path.exists("make_instruction"):
+                            print(
+                                f"Contents of make_instruction: {os.listdir('make_instruction')}"
+                            )
+                    except Exception as e:
+                        print(f"Error listing contents: {e}")
+
+                    raise FileNotFoundError(
+                        f"group_index.json not found in any location. Tried: {[ground_truth_path] + alternative_paths}"
+                    )
+
+        print(f"Loading group_index.json from: {ground_truth_path}")
         self.ground_truth = get_json(ground_truth_path)
 
     # 업태와 업종을 기반으로 그룹 분류 후, 용도 파악하여 기준데이터 불러오기

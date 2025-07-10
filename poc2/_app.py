@@ -9,6 +9,7 @@ import json
 import os
 import sys
 import tempfile
+import importlib.util
 from pathlib import Path
 from datetime import datetime
 import traceback
@@ -18,23 +19,137 @@ import logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# 필요한 모듈 import
-from _run import Analyze, main
-from _preprocess import excel_to_txt, preprocess_excel
-from utils import get_data_from_txt, get_previous_monthes
-import ast
 
-# 모델 경로 설정 - Streamlit Cloud 호환 방식으로 변경
-# MODEL_PATH = os.path.abspath("../")  # 제거
-# sys.path.append(MODEL_PATH)
+# Streamlit Cloud 호환 경로 설정
+def setup_paths():
+    """Streamlit Cloud 환경에서 경로를 설정합니다."""
+    # 현재 파일의 디렉토리
+    current_dir = os.path.dirname(os.path.abspath(__file__))
 
-# 현재 디렉토리 기준으로 모델 import (Streamlit Cloud 호환)
+    # 프로젝트 루트 디렉토리 (poc2의 상위)
+    project_root = os.path.dirname(current_dir)
+
+    # 현재 디렉토리 (poc2)를 path에 추가
+    if current_dir not in sys.path:
+        sys.path.insert(0, current_dir)
+
+    # 프로젝트 루트를 path에 추가
+    if project_root not in sys.path:
+        sys.path.insert(0, project_root)
+
+    return current_dir, project_root
+
+
+def show_debug_info():
+    """Streamlit Cloud에서 디버깅을 위한 환경 정보 표시"""
+    if st.sidebar.checkbox("🔍 디버그 정보 표시"):
+        with st.sidebar.expander("🔧 환경 정보", expanded=False):
+            st.write("**📁 경로 정보:**")
+            st.code(f"현재 디렉토리: {current_dir}")
+            st.code(f"프로젝트 루트: {project_root}")
+            st.code(f"작업 디렉토리: {os.getcwd()}")
+
+            st.write("**📦 Python 경로:**")
+            for i, path in enumerate(sys.path[:5]):  # 처음 5개만 표시
+                st.code(f"{i}: {path}")
+
+            st.write("**📄 파일 존재 확인:**")
+            files_to_check = [
+                os.path.join(current_dir, "_run.py"),
+                os.path.join(current_dir, "_preprocess.py"),
+                os.path.join(current_dir, "utils.py"),
+                os.path.join(project_root, "model.py"),
+                os.path.join(current_dir, "model.py"),
+            ]
+
+            for file_path in files_to_check:
+                exists = "✅" if os.path.exists(file_path) else "❌"
+                st.code(f"{exists} {os.path.basename(file_path)}: {file_path}")
+
+            st.write("**🌍 환경변수:**")
+            env_vars = ["OPENAI_API_KEY", "PYTHONPATH", "PATH"]
+            for var in env_vars:
+                value = os.environ.get(var, "❌ 설정되지 않음")
+                if var == "OPENAI_API_KEY" and value != "❌ 설정되지 않음":
+                    value = f"✅ 설정됨 (길이: {len(value)})"
+                elif var in ["PYTHONPATH", "PATH"] and value != "❌ 설정되지 않음":
+                    value = f"✅ 설정됨 (경로 수: {len(value.split(os.pathsep))})"
+                st.code(f"{var}: {value}")
+
+
+# 경로 설정 실행
+current_dir, project_root = setup_paths()
+
+# 필요한 모듈 import - 경로 문제 해결
 try:
-    from model import initialize_llm
-except ImportError:
-    # 상위 디렉토리에서 찾기
-    sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    from model import initialize_llm
+    # 현재 디렉토리에서 import 시도
+    from _run import Analyze, main
+    from _preprocess import excel_to_txt, preprocess_excel
+    from utils import get_data_from_txt, get_previous_monthes
+    import ast
+
+    logger.info("Successfully imported modules from current directory")
+except ImportError as e:
+    logger.error(f"Failed to import from current directory: {e}")
+    st.error(f"❌ 모듈 import 실패: {e}")
+    st.stop()
+
+
+# 모델 import - 우선순위: 프로젝트 루트의 model.py
+def import_model():
+    """모델을 안전하게 import하는 함수"""
+    root_model_path = os.path.join(project_root, "model.py")
+    current_model_path = os.path.join(current_dir, "model.py")
+
+    # 1. 프로젝트 루트의 model.py 시도
+    if os.path.exists(root_model_path):
+        try:
+            spec = importlib.util.spec_from_file_location("model", root_model_path)
+            model_module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(model_module)
+            logger.info(f"Successfully imported model from root: {root_model_path}")
+            return model_module.initialize_llm
+        except Exception as e:
+            logger.warning(f"Failed to import from root model.py: {e}")
+
+    # 2. 현재 디렉토리의 model.py 시도
+    if os.path.exists(current_model_path):
+        try:
+            from model import initialize_llm
+
+            logger.info(
+                f"Successfully imported model from current directory: {current_model_path}"
+            )
+            return initialize_llm
+        except Exception as e:
+            logger.warning(f"Failed to import from current model.py: {e}")
+
+    # 3. 일반적인 import 시도 (sys.path 의존)
+    try:
+        from model import initialize_llm
+
+        logger.info("Successfully imported model using standard import")
+        return initialize_llm
+    except Exception as e:
+        logger.error(f"All model import attempts failed: {e}")
+        raise ImportError(f"Cannot find or import model.py from any location")
+
+
+try:
+    initialize_llm = import_model()
+    logger.info("Model successfully imported and ready to use")
+except Exception as final_error:
+    logger.error(f"Final model import failed: {final_error}")
+    st.error(f"❌ 모델 모듈을 찾을 수 없습니다: {final_error}")
+    st.error(f"🔍 현재 디렉토리: {current_dir}")
+    st.error(f"🔍 프로젝트 루트: {project_root}")
+    st.error(
+        f"🔍 Root model.py exists: {os.path.exists(os.path.join(project_root, 'model.py'))}"
+    )
+    st.error(
+        f"🔍 Current model.py exists: {os.path.exists(os.path.join(current_dir, 'model.py'))}"
+    )
+    st.stop()
 
 # Streamlit 페이지 설정
 st.set_page_config(page_title="이상치 분석 시스템", page_icon="📊", layout="wide")
@@ -826,7 +941,7 @@ def generate_html_report(filtered_results):
                 <h1>📊 이상치 분석 리포트</h1>
                 <p>생성일시: {datetime.now().strftime('%Y년 %m월 %d일 %H:%M:%S')}</p>
             </div>
-            
+
             <div class="summary">
                 <div class="summary-item">
                     <h3>{len(filtered_results)}</h3>
@@ -841,7 +956,7 @@ def generate_html_report(filtered_results):
                     <p>카테고리 수</p>
                 </div>
             </div>
-            
+
             <div class="content">
     """
 
@@ -891,12 +1006,12 @@ def generate_html_report(filtered_results):
                                 <p>{reason_value if reason_value else '이유 정보 없음'}</p>
                             </div>
                         </div>
-                        
+
                         <div class="chart-container">
                             <h4>📈 3년치 데이터 vs 표준값 비교 차트</h4>
                             {chart_html}
                         </div>
-                        
+
                         <div class="info-grid">
                             <div class="info-box">
                                 <h4>📊 기준 데이터</h4>
@@ -932,7 +1047,7 @@ def generate_html_report(filtered_results):
     # HTML 마무리
     html_content += """
             </div>
-            
+
             <div class="footer">
                 <p>이상치 분석 시스템에서 생성된 리포트입니다.</p>
                 <p>본 리포트는 AI 기반 분석 결과를 포함하고 있습니다.</p>
@@ -1006,12 +1121,108 @@ def create_excel_report(filtered_results):
     return summary_df, detailed_df
 
 
+def safe_create_temp_file(suffix="", content=None, mode="wb"):
+    """Streamlit Cloud 호환 임시 파일 생성"""
+    try:
+        # 임시 디렉토리 확보
+        temp_dir = tempfile.gettempdir()
+
+        # 고유한 파일명 생성
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+        temp_filename = f"streamlit_temp_{timestamp}{suffix}"
+        temp_path = os.path.join(temp_dir, temp_filename)
+
+        # 파일 생성
+        if content is not None:
+            with open(temp_path, mode) as f:
+                f.write(content)
+
+        logger.info(f"Created temp file: {temp_path}")
+        return temp_path
+    except Exception as e:
+        logger.error(f"Failed to create temp file: {e}")
+        raise
+
+
+def check_environment():
+    """Streamlit Cloud 환경 설정 확인"""
+    warnings = []
+    errors = []
+
+    # OpenAI API 키 확인
+    api_key = os.environ.get("OPENAI_API_KEY")
+    if not api_key:
+        errors.append("🔑 OPENAI_API_KEY 환경변수가 설정되지 않았습니다")
+    elif len(api_key) < 10:  # 최소 길이 확인
+        errors.append("🔑 OPENAI_API_KEY가 올바르지 않을 수 있습니다 (너무 짧음)")
+
+    # 필수 파일들 존재 확인
+    required_files = [
+        ("_run.py", os.path.join(current_dir, "_run.py")),
+        ("_preprocess.py", os.path.join(current_dir, "_preprocess.py")),
+        ("utils.py", os.path.join(current_dir, "utils.py")),
+    ]
+
+    for filename, filepath in required_files:
+        if not os.path.exists(filepath):
+            errors.append(f"📄 필수 파일 {filename}을 찾을 수 없습니다: {filepath}")
+
+    # 모델 파일 확인 (경고만)
+    root_model = os.path.join(project_root, "model.py")
+    current_model = os.path.join(current_dir, "model.py")
+    if not os.path.exists(root_model) and not os.path.exists(current_model):
+        warnings.append("📄 model.py 파일을 찾을 수 없습니다")
+
+    # 작업 디렉토리 쓰기 권한 확인
+    try:
+        test_file = os.path.join(tempfile.gettempdir(), "streamlit_write_test.txt")
+        with open(test_file, "w") as f:
+            f.write("test")
+        os.unlink(test_file)
+    except Exception as e:
+        warnings.append(f"⚠️ 임시 디렉토리 쓰기 권한 문제: {str(e)}")
+
+    return warnings, errors
+
+
 def main():
     st.title("📊 이상치 분석 시스템")
     st.markdown("---")
 
+    # 환경 설정 확인
+    warnings, errors = check_environment()
+
+    if errors:
+        st.error("❌ **환경 설정 오류가 발견되었습니다:**")
+        for error in errors:
+            st.error(error)
+
+        if "OPENAI_API_KEY" in " ".join(errors):
+            st.info(
+                """
+            **🔧 해결 방법:**
+            1. Streamlit Cloud의 앱 설정으로 이동
+            2. 'Secrets' 탭에서 OPENAI_API_KEY를 추가
+            3. 앱을 재시작
+            
+            **Secrets 설정 예시:**
+            ```
+            OPENAI_API_KEY = "sk-your-api-key-here"
+            ```
+            """
+            )
+        st.stop()
+
+    if warnings:
+        with st.expander("⚠️ 경고 사항", expanded=False):
+            for warning in warnings:
+                st.warning(warning)
+
     # 사이드바
     st.sidebar.title("📋 메뉴")
+
+    # Streamlit Cloud 디버깅 정보 표시
+    show_debug_info()
 
     # 파일 업로드
     st.sidebar.subheader("1. 데이터 업로드")
@@ -1022,10 +1233,17 @@ def main():
     )
 
     if uploaded_file is not None:
-        # 임시 파일 저장
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx") as tmp_file:
-            tmp_file.write(uploaded_file.read())
-            temp_excel_path = tmp_file.name
+        # 안전한 임시 파일 저장
+        try:
+            temp_excel_path = safe_create_temp_file(
+                suffix=".xlsx", content=uploaded_file.read(), mode="wb"
+            )
+            st.sidebar.success(
+                f"✅ 파일 업로드 완료: {os.path.basename(temp_excel_path)}"
+            )
+        except Exception as upload_error:
+            st.sidebar.error(f"❌ 파일 업로드 실패: {str(upload_error)}")
+            st.stop()
 
         # 전처리
         st.sidebar.subheader("2. 전처리")
@@ -1035,110 +1253,128 @@ def main():
                     st.sidebar.info("🔄 전처리 단계 시작...")
                     logger.info("Preprocessing started")
 
-                    # Streamlit Cloud 호환을 위해 모든 파일을 tempfile로 처리
-                    with tempfile.NamedTemporaryFile(
-                        delete=False, suffix=".xlsx"
-                    ) as preprocessed_excel_file:
-                        # 1단계: preprocess_excel 실행 (Excel → 전처리된 Excel)
-                        st.sidebar.info("📊 1단계: Excel 전처리 중...")
-                        logger.info("Step 1: Excel preprocessing")
+                    # 1단계: preprocess_excel 실행 (Excel → 전처리된 Excel)
+                    st.sidebar.info("📊 1단계: Excel 전처리 중...")
+                    logger.info("Step 1: Excel preprocessing")
 
-                        try:
-                            preprocessed_excel_path = preprocess_excel(
-                                temp_excel_path, preprocessed_excel_file.name
-                            )
-                            st.sidebar.success(
-                                f"✅ 1단계 완료: {preprocessed_excel_path}"
-                            )
-                            logger.info(f"Step 1 completed: {preprocessed_excel_path}")
-                        except Exception as excel_error:
-                            error_msg = f"❌ Excel 전처리 실패: {str(excel_error)}"
-                            st.sidebar.error(error_msg)
-                            st.sidebar.error(
-                                f"🔍 Excel 전처리 에러 상세: {traceback.format_exc()}"
-                            )
-                            logger.error(f"Excel preprocessing failed: {error_msg}")
-                            logger.error(
-                                f"Excel preprocessing error traceback: {traceback.format_exc()}"
-                            )
-                            raise
+                    try:
+                        # 전처리된 Excel을 위한 임시 파일 생성
+                        preprocessed_excel_path = safe_create_temp_file(suffix=".xlsx")
 
-                        # 2단계: excel_to_txt 실행 (전처리된 Excel → TXT)
-                        st.sidebar.info("📝 2단계: TXT 변환 중...")
-                        logger.info("Step 2: Converting to TXT")
+                        # 전처리 실행
+                        result_path = preprocess_excel(
+                            temp_excel_path, preprocessed_excel_path
+                        )
 
-                        with tempfile.NamedTemporaryFile(
-                            delete=False, suffix=".txt", mode="w", encoding="utf-8"
-                        ) as preprocessed_txt_file:
-                            # 파일을 닫고 경로만 사용
-                            preprocessed_txt_file.close()
-                            try:
-                                preprocessed_path = excel_to_txt(
-                                    preprocessed_excel_path, preprocessed_txt_file.name
-                                )
-                                st.sidebar.success(
-                                    f"✅ 2단계 완료: {preprocessed_path}"
-                                )
-                                logger.info(f"Step 2 completed: {preprocessed_path}")
-                            except Exception as txt_error:
-                                error_msg = f"❌ TXT 변환 실패: {str(txt_error)}"
-                                st.sidebar.error(error_msg)
-                                st.sidebar.error(
-                                    f"🔍 TXT 변환 에러 상세: {traceback.format_exc()}"
-                                )
-                                logger.error(f"TXT conversion failed: {error_msg}")
-                                logger.error(
-                                    f"TXT conversion error traceback: {traceback.format_exc()}"
-                                )
-                                raise
+                        st.sidebar.success(
+                            f"✅ 1단계 완료: {os.path.basename(result_path)}"
+                        )
+                        logger.info(f"Step 1 completed: {result_path}")
+
+                    except Exception as excel_error:
+                        error_msg = f"❌ Excel 전처리 실패: {str(excel_error)}"
+                        st.sidebar.error(error_msg)
+                        st.sidebar.error(
+                            f"🔍 Excel 전처리 에러 상세: {traceback.format_exc()}"
+                        )
+                        logger.error(f"Excel preprocessing failed: {error_msg}")
+                        logger.error(
+                            f"Excel preprocessing error traceback: {traceback.format_exc()}"
+                        )
+                        raise
+
+                    # 2단계: excel_to_txt 실행 (전처리된 Excel → TXT)
+                    st.sidebar.info("📝 2단계: TXT 변환 중...")
+                    logger.info("Step 2: Converting to TXT")
+
+                    try:
+                        # TXT 파일을 위한 임시 파일 생성
+                        preprocessed_txt_path = safe_create_temp_file(suffix=".txt")
+
+                        # TXT 변환 실행
+                        final_path = excel_to_txt(result_path, preprocessed_txt_path)
+
+                        st.sidebar.success(
+                            f"✅ 2단계 완료: {os.path.basename(final_path)}"
+                        )
+                        logger.info(f"Step 2 completed: {final_path}")
+
+                    except Exception as txt_error:
+                        error_msg = f"❌ TXT 변환 실패: {str(txt_error)}"
+                        st.sidebar.error(error_msg)
+                        st.sidebar.error(
+                            f"🔍 TXT 변환 에러 상세: {traceback.format_exc()}"
+                        )
+                        logger.error(f"TXT conversion failed: {error_msg}")
+                        logger.error(
+                            f"TXT conversion error traceback: {traceback.format_exc()}"
+                        )
+                        raise
 
                     st.sidebar.success("✅ 전처리 완료!")
-                    st.session_state.preprocessed_path = preprocessed_path
+                    st.session_state.preprocessed_path = final_path
                     logger.info("Preprocessing completed successfully")
 
                     # 디버깅 정보 표시
-                    st.sidebar.info(f"📁 전처리된 파일 경로: {preprocessed_path}")
-                    logger.info(f"Preprocessed file path: {preprocessed_path}")
+                    st.sidebar.info(f"📁 전처리된 파일: {os.path.basename(final_path)}")
+                    logger.info(f"Preprocessed file path: {final_path}")
 
                     # 전처리된 데이터 미리보기
                     try:
                         st.sidebar.info("🔍 데이터 검증 중...")
                         logger.info("Validating preprocessed data")
 
-                        with open(preprocessed_path, "r", encoding="utf-8") as f:
-                            lines = f.readlines()
-                            st.sidebar.success(
-                                f"📊 전처리된 데이터 라인 수: {len(lines)}"
-                            )
-                            logger.info(f"Preprocessed data lines: {len(lines)}")
+                        if os.path.exists(final_path):
+                            with open(final_path, "r", encoding="utf-8") as f:
+                                lines = f.readlines()
+                                st.sidebar.success(
+                                    f"📊 전처리된 데이터 라인 수: {len(lines)}"
+                                )
+                                logger.info(f"Preprocessed data lines: {len(lines)}")
 
-                            if len(lines) > 0:
-                                # 첫 번째 라인을 JSON으로 파싱해서 키 확인
-                                try:
-                                    first_item = json.loads(lines[0].strip())
-                                    st.sidebar.info(
-                                        f"🔍 데이터 키들: {list(first_item.keys())}"
-                                    )
-                                    logger.info(f"Data keys: {list(first_item.keys())}")
+                                if len(lines) > 0:
+                                    # 첫 번째 라인을 JSON으로 파싱해서 키 확인
+                                    try:
+                                        first_item = json.loads(lines[0].strip())
+                                        st.sidebar.info(
+                                            f"🔍 데이터 키들: {list(first_item.keys())}"
+                                        )
+                                        logger.info(
+                                            f"Data keys: {list(first_item.keys())}"
+                                        )
 
-                                    # 샘플 데이터 일부 표시
-                                    if len(lines) >= 3:
-                                        st.sidebar.info(f"📄 샘플 3줄 처리됨")
-                                        logger.info("Sample 3 lines processed")
-                                except json.JSONDecodeError as json_error:
-                                    error_msg = f"❌ JSON 파싱 실패: {str(json_error)}"
+                                        # 샘플 데이터 일부 표시
+                                        if len(lines) >= 3:
+                                            st.sidebar.info(
+                                                f"📄 샘플 {min(3, len(lines))}줄 처리됨"
+                                            )
+                                            logger.info(
+                                                f"Sample {min(3, len(lines))} lines processed"
+                                            )
+                                    except json.JSONDecodeError as json_error:
+                                        error_msg = (
+                                            f"❌ JSON 파싱 실패: {str(json_error)}"
+                                        )
+                                        st.sidebar.error(error_msg)
+                                        st.sidebar.error(
+                                            f"🔍 첫 번째 라인: {lines[0][:200]}..."
+                                        )
+                                        logger.error(
+                                            f"JSON parsing failed: {error_msg}"
+                                        )
+                                        logger.error(
+                                            f"First line preview: {lines[0][:200]}..."
+                                        )
+                                else:
+                                    error_msg = "❌ 전처리된 파일이 비어있습니다"
                                     st.sidebar.error(error_msg)
-                                    st.sidebar.error(
-                                        f"🔍 첫 번째 라인: {lines[0][:200]}..."
-                                    )
-                                    logger.error(f"JSON parsing failed: {error_msg}")
-                                    logger.error(
-                                        f"First line preview: {lines[0][:200]}..."
-                                    )
-                            else:
-                                error_msg = "❌ 전처리된 파일이 비어있습니다"
-                                st.sidebar.error(error_msg)
-                                logger.error(error_msg)
+                                    logger.error(error_msg)
+                        else:
+                            error_msg = (
+                                f"❌ 전처리된 파일을 찾을 수 없습니다: {final_path}"
+                            )
+                            st.sidebar.error(error_msg)
+                            logger.error(error_msg)
 
                     except Exception as preview_error:
                         error_msg = f"⚠️ 데이터 미리보기 실패: {str(preview_error)}"
@@ -1176,7 +1412,9 @@ def main():
 
                 # 파일 경로 검증
                 preprocessed_path = st.session_state.preprocessed_path
-                st.sidebar.info(f"📁 사용할 파일: {preprocessed_path}")
+                st.sidebar.info(
+                    f"📁 사용할 파일: {os.path.basename(preprocessed_path)}"
+                )
                 logger.info(f"Using file: {preprocessed_path}")
 
                 # 파일 존재 여부 확인
@@ -1336,18 +1574,20 @@ def main():
                 # Excel 리포트 생성
                 summary_df, detailed_df = create_excel_report(filtered_results)
 
-                # Excel 파일로 저장
-                with tempfile.NamedTemporaryFile(
-                    delete=False, suffix=".xlsx"
-                ) as tmp_file:
-                    with pd.ExcelWriter(tmp_file.name, engine="openpyxl") as writer:
+                # Excel 파일로 안전하게 저장
+                try:
+                    # 안전한 임시 파일 생성
+                    excel_temp_path = safe_create_temp_file(suffix=".xlsx")
+
+                    # Excel 데이터 작성
+                    with pd.ExcelWriter(excel_temp_path, engine="openpyxl") as writer:
                         summary_df.to_excel(writer, sheet_name="요약", index=False)
                         detailed_df.to_excel(
                             writer, sheet_name="상세데이터", index=False
                         )
 
                     # 파일 읽어서 다운로드 버튼에 제공
-                    with open(tmp_file.name, "rb") as f:
+                    with open(excel_temp_path, "rb") as f:
                         excel_data = f.read()
 
                     st.download_button(
@@ -1358,12 +1598,23 @@ def main():
                         help="Excel에서 열어서 데이터를 추가 분석할 수 있습니다",
                     )
 
+                    # 임시 파일 정리 (선택적)
+                    try:
+                        os.unlink(excel_temp_path)
+                        logger.info(f"Cleaned up temp Excel file: {excel_temp_path}")
+                    except Exception as cleanup_error:
+                        logger.warning(f"Failed to cleanup temp file: {cleanup_error}")
+
+                except Exception as excel_gen_error:
+                    st.error(f"❌ Excel 리포트 생성 실패: {str(excel_gen_error)}")
+                    logger.error(f"Excel report generation failed: {excel_gen_error}")
+
             # 다운로드 가이드
             st.markdown("---")
             st.success(
                 """
             ✅ **분석 완료!** 위의 다운로드 버튼을 클릭하여 결과를 확인하세요.
-            
+
             📋 **파일 설명:**
             - **HTML 리포트**: 브라우저에서 열어서 이쁜 차트와 함께 모든 결과를 한눈에 확인
             - **Excel 리포트**: '요약' 시트와 '상세데이터' 시트로 구성되어 추가 분석 가능
@@ -1378,11 +1629,11 @@ def main():
         st.markdown(
             """
         ## 🚀 시작하기
-        
+
         1. **왼쪽 사이드바**에서 Excel 파일을 업로드하세요
         2. **전처리 실행** 버튼을 클릭하세요
         3. **분석 시작** 버튼을 클릭하여 이상치 분석을 실행하세요
-        
+
         ### 📋 기능
         - **1차 분석**: 기준 데이터 대비 이상치 탐지
         - **2차 패턴 체크**: AI를 통한 패턴 분석

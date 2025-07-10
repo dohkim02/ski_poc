@@ -1,7 +1,7 @@
 import json
 import pandas as pd
 import ast
-
+import os
 import pandas as pd
 import matplotlib.pyplot as plt
 import numpy as np
@@ -9,24 +9,189 @@ from datetime import datetime
 import seaborn as sns
 
 
+def find_group_usage_combination(
+    data, target_grade, target_group, target_usage, target_pressure_group=None
+):
+    """
+    JSON 파일에서 특정 그룹, 용도, 등급, 압력_그룹 조합을 찾는 함수
+
+    Args:
+        target_group: 찾고자 하는 그룹명 (예: '제조업')
+        target_usage: 찾고자 하는 용도명 (예: '일반용1')
+        target_grade: 찾고자 하는 등급 (예: 'A', 선택적)
+        target_pressure_group: 찾고자 하는 압력_그룹 (예: '고압', 선택적)
+
+    Returns:
+        list: 매칭되는 인덱스들의 리스트
+    """
+    groups = data["그룹"]
+    usages = data["용도"]
+
+    # 1. 그룹에서 target_group과 일치하는 인덱스들 찾기
+    group_indices = []
+    for index, group in groups.items():
+        if group == target_group:
+            group_indices.append(index)
+
+    # 2. 용도에서 target_usage와 일치하는 인덱스들 찾기
+    usage_indices = []
+    for index, usage in usages.items():
+        if usage == target_usage:
+            usage_indices.append(index)
+
+    # 3. 등급이 지정된 경우 등급도 확인
+    grade_indices = []
+    if target_grade and "등급" in data:
+        grades = data["등급"]
+        for index, grade in grades.items():
+            if grade == target_grade:
+                grade_indices.append(index)
+
+    # 4. 압력_그룹이 지정된 경우 압력_그룹도 확인
+    pressure_indices = []
+    if target_pressure_group and "압력_그룹" in data:
+        pressure_groups = data["압력_그룹"]
+        for index, pressure_group in pressure_groups.items():
+            if pressure_group == target_pressure_group:
+                pressure_indices.append(index)
+
+    # 5. 교집합 구하기 (4개 조건 모두 고려)
+    all_indices = [group_indices, usage_indices]
+
+    if target_grade and grade_indices:
+        all_indices.append(grade_indices)
+
+    if target_pressure_group and pressure_indices:
+        all_indices.append(pressure_indices)
+
+    # 모든 조건을 만족하는 인덱스들의 교집합
+    matching_indices = (
+        list(set.intersection(*map(set, all_indices))) if all_indices else []
+    )
+
+    return matching_indices
+
+
+def get_group_usage_info(
+    data, target_grade, target_group, target_usage, target_pressure_group=None
+):
+    """
+    특정 그룹, 용도, 등급, 압력_그룹 조합의 모든 정보를 반환하는 함수
+
+    Args:
+        data: JSON 데이터
+        target_group: 찾고자 하는 그룹명
+        target_usage: 찾고자 하는 용도명
+        target_grade: 찾고자 하는 등급
+        target_pressure_group: 찾고자 하는 압력_그룹
+    """
+    matching_indices = find_group_usage_combination(
+        data, target_grade, target_group, target_usage, target_pressure_group
+    )
+
+    if not matching_indices:
+        grade_info = f", 등급: '{target_grade}'" if target_grade else ""
+        pressure_info = (
+            f", 압력_그룹: '{target_pressure_group}'" if target_pressure_group else ""
+        )
+        return f"'{target_group}', '{target_usage}'{grade_info}{pressure_info} 조합을 찾을 수 없습니다."
+
+    results = []
+    for index in matching_indices:
+        result_item = {
+            "index": index,
+            "grade": data["등급"][index],
+            "group": data["그룹"][index],
+            "usage": data["용도"][index],
+            "data_num": data["데이터 개수"][index],
+        }
+
+        # 압력_그룹 정보가 있는 경우 추가
+        if "압력_그룹" in data:
+            result_item["pressure_group"] = data["압력_그룹"][index]
+
+        results.append(result_item)
+
+    # 카테고리 정보 생성 (압력_그룹 포함)
+    category_parts = [results[0]["grade"], results[0]["group"], results[0]["usage"]]
+
+    # 압력_그룹이 있는 경우 추가
+    if "pressure_group" in results[0]:
+        category_parts.append(results[0]["pressure_group"])
+
+    category = "(" + ", ".join(category_parts) + ")"
+    data_num = results[0]["data_num"]
+
+    return {
+        "category": category,
+        "standard": data["사용량 패턴 기준값"][results[0]["index"]],
+        "data_num": data_num,
+    }
+
+
+def clean_column_names(df):
+    import re
+
+    new_columns = []
+    for col in df.columns:
+        if isinstance(col, str):
+            # 문자열 컬럼명만 정리
+            clean_col = col.strip()  # 앞뒤 공백 제거
+            clean_col = re.sub(r"\([^)]*\)", "", clean_col)  # 괄호 안 내용 제거
+            clean_col = clean_col.replace(" ", "")  # 중간 공백 제거
+            clean_col = clean_col.replace(".", "")  # 점 제거
+            new_columns.append(clean_col)
+        else:
+            # datetime이나 다른 타입은 그대로 유지
+            new_columns.append(col)
+
+    df.columns = new_columns
+    return df
+
+
+def categorize_pressure(p):
+    if p <= 0.0981:
+        return "저압"
+    elif p <= 0.1961:
+        return "준저압1"
+    elif p <= 0.2942:
+        return "준저압2"
+    elif p <= 0.3923:
+        return "준저압3"
+    elif p <= 0.4903:
+        return "준저압4"
+    elif p <= 0.5982:
+        return "준저압5"
+    elif p <= 0.6963:
+        return "준저압6"
+    elif p <= 0.7944:
+        return "준저압7"
+    elif p <= 0.8924:
+        return "준저압8"
+    elif p <= 0.9807:
+        return "준저압9"
+    elif p <= 1.9908:
+        return "중압1"
+    elif p <= 2.9911:
+        return "중압2"
+    elif p <= 3.9914:
+        return "중압3"
+    elif p <= 4.9034:
+        return "중압4"
+    elif p <= 5.5016:
+        return "중압5"
+    elif p <= 6.9236:
+        return "중압6"
+    elif p <= 7.9631:
+        return "중압7"
+    else:
+        return "중압8"
+
+
 def get_json(path):
     with open(path, "r", encoding="utf-8") as f:
         data = json.load(f)
     return data
-
-
-def get_heat_input_gt(heat_input):
-
-    if 10000 <= heat_input < 50000:
-
-        return "10000~50000"
-
-    if 50000 <= heat_input < 100000:
-
-        return "50000~100000"
-    if heat_input >= 100000:
-
-        return "100000~"
 
 
 def extract_group_data(group_key: str, full_data: dict) -> dict:
@@ -52,6 +217,9 @@ class MonthlyAverageAnalyzer:
         """
         # 데이터프레임 생성
         self.data = pd.DataFrame({"period": periods, "value": values})
+
+        # period 컬럼을 문자열로 변환 (str accessor 사용을 위해)
+        self.data["period"] = self.data["period"].astype(str)
 
         # 년도와 월 분리
         self.data["year"] = self.data["period"].str[:2].astype(int) + 2000
@@ -297,100 +465,119 @@ def get_exel_with_biz_lst(txt_path, xlsx_path, output_path):
 import json
 
 
-def find_group_usage_combination(data, target_heat_range, target_group, target_usage):
-    """
-    JSON 파일에서 특정 그룹, 용도, 열량범위 조합을 찾는 함수
-
-    Args:
-        target_group: 찾고자 하는 그룹명 (예: '제조업')
-        target_usage: 찾고자 하는 용도명 (예: '일반용1')
-        target_heat_range: 찾고자 하는 열량범위 (예: '10000~50000', 선택적)
-
-    Returns:
-        list: 매칭되는 인덱스들의 리스트
-    """
-    groups = data["그룹"]
-    usages = data["용도"]
-
-    # 1. 그룹에서 target_group과 일치하는 인덱스들 찾기
-    group_indices = []
-    for index, group in groups.items():
-        if group == target_group:
-            group_indices.append(index)
-
-    # 2. 용도에서 target_usage와 일치하는 인덱스들 찾기
-    usage_indices = []
-    for index, usage in usages.items():
-        if usage == target_usage:
-            usage_indices.append(index)
-
-    # 3. 열량범위가 지정된 경우 열량범위도 확인
-    heat_indices = []
-    if target_heat_range and "열량범위" in data:
-        heat_ranges = data["열량범위"]
-        for index, heat_range in heat_ranges.items():
-            if heat_range == target_heat_range:
-                heat_indices.append(index)
-
-    # 4. 교집합 구하기
-    if target_heat_range and heat_indices:
-        # 열량범위가 지정되고 데이터에 열량범위가 있는 경우 3개 조건 모두 만족
-        matching_indices = list(
-            set(group_indices) & set(usage_indices) & set(heat_indices)
+def get_latest_6month(years_data):
+    # 안전한 데이터 변환
+    if isinstance(years_data, str):
+        try:
+            years_data = ast.literal_eval(years_data)
+        except (ValueError, SyntaxError):
+            print(
+                f"Warning: Could not parse years_data in get_latest_6month: {years_data}"
+            )
+            return {}
+    elif not isinstance(years_data, dict):
+        print(
+            f"Warning: years_data is not a valid format in get_latest_6month: {type(years_data)}"
         )
-    else:
-        # 열량범위가 지정되지 않았거나 데이터에 열량범위가 없는 경우 기존 방식
-        matching_indices = list(set(group_indices) & set(usage_indices))
+        return {}
 
-    return matching_indices
+    # 평탄화: (연도, 월) -> 값
+    flat_data = []
+    for year in sorted(years_data.keys()):
+        for month in sorted(years_data[year].keys()):
+            flat_data.append(((int(year), int(month)), years_data[year][month]))
+
+    # 최근 6개월
+    last_6 = flat_data[-6:]
+
+    # 'M월': value 형식으로 변환 (불필요한 0 제거)
+    recent_dict = {f"{int(month)}월": value for (year, month), value in last_6}
+
+    # 출력
+    return recent_dict
 
 
-def get_group_usage_info(data, target_heat_range, target_group, target_usage):
-    """
-    특정 그룹, 용도, 열량범위 조합의 모든 정보를 반환하는 함수
+def get_previous_monthes(years_data):
+    # 안전한 데이터 변환
+    if isinstance(years_data, str):
+        try:
+            years_data = ast.literal_eval(years_data)
+        except (ValueError, SyntaxError):
+            print(
+                f"Warning: Could not parse years_data in get_previous_monthes: {years_data}"
+            )
+            return {}
+    elif not isinstance(years_data, dict):
+        print(
+            f"Warning: years_data is not a valid format in get_previous_monthes: {type(years_data)}"
+        )
+        return {}
 
-    Args:
-        data: JSON 데이터
-        target_group: 찾고자 하는 그룹명
-        target_usage: 찾고자 하는 용도명
-        target_heat_range: 찾고자 하는 열량범위
-    """
-    matching_indices = find_group_usage_combination(
-        data, target_heat_range, target_group, target_usage
-    )
+    # 평탄화
+    flat_data = []
+    for year in sorted(years_data.keys()):
+        for month in sorted(years_data[year].keys()):
+            flat_data.append(((int(year), int(month)), years_data[year][month]))
 
-    if not matching_indices:
-        heat_info = f", 열량범위: '{target_heat_range}'" if target_heat_range else ""
-        return f"'{target_group}', '{target_usage}'{heat_info} 조합을 찾을 수 없습니다."
+    # 최근 6개월 제외
+    rest_data = flat_data[:-6]
 
-    results = []
-    for index in matching_indices:
-        result_item = {
-            "index": index,
-            "group": data["그룹"][index],
-            "usage": data["용도"][index],
-            "data_num": data["데이터 개수"][index],
-        }
-        # 열량범위 정보가 있으면 추가
-        if "열량범위" in data:
-            result_item["heat_range"] = data["열량범위"][index]
-        results.append(result_item)
+    # 연도별로 나누어 저장
+    result = {}
+    for (year, month), value in rest_data:
+        full_year = f"20{str(year).zfill(2)}"
+        month_str = f"{int(month)}월"
+        if full_year not in result:
+            result[full_year] = {}
+        result[full_year][month_str] = value
 
-    # 카테고리 정보 생성
-    category_parts = [results[0]["group"], results[0]["usage"]]
-    if "heat_range" in results[0]:
-        category_parts.insert(0, results[0]["heat_range"])
-    category = "(" + ", ".join(category_parts) + ")"
-    data_num = results[0]["data_num"]
+    return result
 
-    return {
-        "category": category,
-        "median": data["사용량 패턴 기준값"][results[0]["index"]],
-        "data_num": data_num,
-    }
 
-    # return {
-    #     "category": category,
-    #     "median": data["사용량 패턴 중앙값"][results[0]["index"]],
-    #     "data_num": data_num,
-    # }
+def write_outlier(output_path, outlier_results):
+    with open(output_path, "w", encoding="utf-8") as f:
+        f.write(f"이상 데이터 분석 결과 ({len(outlier_results)}건)\n")
+        f.write("=" * 50 + "\n\n")
+
+        for i, item in enumerate(outlier_results, 1):
+            # ground_truth의 data_num 정보 추가
+            f.write(f"기준 데이터 샘플 수: {item['ground_truth']['data_num']}건\n")
+            f.write(f"기준 데이터: {item['standard_data']}\n")
+            f.write(f"입력 데이터: {item['comparison_input_data']}\n")
+            f.write("-" * 30 + "\n\n")
+
+    print(f"Outlier results saved to: {output_path}")
+
+
+def write_post_process(outlier_results):
+    if outlier_results and "pattern_result" in outlier_results[0]:
+        post_processing_output_path = os.path.join(
+            os.path.dirname(__file__), "outlier_results_post_processing.txt"
+        )
+
+        # result_value == 'yes'인 케이스만 미리 필터링
+        filtered_results = []
+        for item in outlier_results:
+            pattern_result = item["pattern_result"]
+            result_value = getattr(pattern_result, "result", None)
+            if result_value is None and isinstance(pattern_result, dict):
+                result_value = pattern_result.get("result")
+            if result_value == "yes":
+                filtered_results.append(item)
+
+        with open(post_processing_output_path, "w", encoding="utf-8") as f:
+            f.write(f"후처리 후 분석 결과: {len(filtered_results)}건\n")
+            f.write("=" * 60 + "\n\n")
+            for i, item in enumerate(filtered_results, 1):
+                pattern_result = item["pattern_result"]
+                result_value = getattr(pattern_result, "result", None)
+                reason_value = getattr(pattern_result, "reason", None)
+                if result_value is None and isinstance(pattern_result, dict):
+                    result_value = pattern_result.get("result")
+                    reason_value = pattern_result.get("reason")
+                f.write(f"[{i}번째 케이스]\n")
+                f.write(f"기준 데이터: {item['ground_truth']}\n")
+                f.write(f"입력 데이터: {item['input_data']}\n")
+                f.write(f"결과: {result_value}\n")
+                f.write(f"이유: {reason_value}\n")
+                f.write("-" * 50 + "\n\n")

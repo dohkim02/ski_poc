@@ -77,15 +77,3 @@ async def main():
 # # ⬇️ 진입점 실행
 if __name__ == "__main__":
     asyncio.run(main())
-
-    # 사용 예시
-    # get_exel_with_biz_lst(
-    #     txt_path="./clustering_result.txt",
-    #     xlsx_path="./preprocessed.xlsx",
-    #     output_path="./group_biz_with_12.xlsx",
-    # )
-
-    import pdb
-
-    pdb.set_trace()
-    pass

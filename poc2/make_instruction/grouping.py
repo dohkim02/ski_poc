@@ -367,17 +367,17 @@ class ExcelGroupProcessor:
 
         return combination_count
 
-    def create_heat_group_column(self):
+    def create_grade_group_column(self):
         """
-        열량 컬럼을 기반으로 열량 범위 그룹을 생성하고,
-        '열량범위_그룹_용도' 형태의 새로운 컬럼을 추가
+        등급 컬럼을 기반으로 등급 그룹을 생성하고,
+        '등급_그룹_용도_압력그룹' 형태의 새로운 컬럼을 추가
         """
         if self.df is None:
             print("데이터가 로드되지 않았습니다.")
             return False
 
         # 필요한 컬럼들이 존재하는지 확인
-        required_columns = ["열량", "그룹", "용도"]
+        required_columns = ["등급", "그룹", "용도", "압력_그룹"]
         missing_columns = [
             col for col in required_columns if col not in self.df.columns
         ]
@@ -386,30 +386,30 @@ class ExcelGroupProcessor:
             print(f"필요한 컬럼이 없습니다: {missing_columns}")
             return False
 
-        # 열량 범위 그룹 생성
-        self.df["열량범위"] = self.df["열량"].apply(
-            lambda x: get_heat_input_gt(x) if pd.notna(x) else "Unknown"
-        )
-
-        # 열량범위_그룹_용도 조합 컬럼 생성
-        self.df["열량범위_그룹_용도"] = (
-            self.df["열량범위"].astype(str)
+        # 등급_그룹_용도_압력그룹 조합 컬럼 생성
+        self.df["등급_그룹_용도_압력그룹"] = (
+            self.df["등급"].astype(str)
             + "_"
             + self.df["그룹"].astype(str)
             + "_"
             + self.df["용도"].astype(str)
+            + "_"
+            + self.df["압력_그룹"].astype(str)
         )
 
-        print(f"✅ 열량 범위 그룹화 완료")
-        print(f"   - 생성된 열량 범위: {self.df['열량범위'].value_counts().to_dict()}")
+        print(f"✅ 등급 기준 그룹화 완료 (압력_그룹 포함)")
+        print(f"   - 등급별 분포: {self.df['등급'].value_counts().to_dict()}")
+        print(f"   - 압력_그룹별 분포: {self.df['압력_그룹'].value_counts().to_dict()}")
 
         return True
 
     # 용도별 평균!!!!
 
-    def group_and_calculate(self, group_columns=["그룹", "용도"]):
+    def group_and_calculate_with_grade(
+        self, group_columns=["등급", "그룹", "용도", "압력_그룹"]
+    ):
         """
-        지정된 컬럼들을 기준으로 그룹화하고 적응형 통계 계산
+        등급과 압력_그룹을 포함한 지정된 컬럼들을 기준으로 그룹화하고 적응형 통계 계산
 
         Args:
             group_columns (list): 그룹화할 컬럼명 리스트
@@ -421,75 +421,8 @@ class ExcelGroupProcessor:
             print("데이터가 로드되지 않았습니다.")
             return None
 
-        # 필요한 컬럼들이 존재하는지 확인
-        required_columns = group_columns + ["사용량_패턴"]
-        missing_columns = [
-            col for col in required_columns if col not in self.df.columns
-        ]
-
-        if missing_columns:
-            print(f"필요한 컬럼이 없습니다: {missing_columns}")
-            return None
-
-        # 그룹별로 데이터 처리
-        grouped_results = []
-
-        for group_value, group_df in self.df.groupby(group_columns):
-            # 다중 컬럼 그룹화의 경우 group_value가 튜플이므로 처리
-            if isinstance(group_value, tuple):
-                group_info = dict(zip(group_columns, group_value))
-            else:
-                group_info = {group_columns[0]: group_value}
-
-            print(f"\n🔍 그룹 분석 중: {group_info}")
-
-            # 사용량 패턴 파싱 및 적응형 통계 계산
-            usage_patterns = []
-            for pattern in group_df["사용량_패턴"]:
-                parsed_pattern = self.parse_usage_pattern(pattern)
-                if parsed_pattern:
-                    usage_patterns.append(parsed_pattern)
-
-            # 월별 적응형 기준값과 변동성 지표 계산
-            monthly_references, monthly_variabilities, monthly_analysis = (
-                self.calculate_adaptive_monthly_stats(usage_patterns)
-            )
-
-            # 결과 저장 (그룹 정보와 통계 정보 포함)
-            result_dict = group_info.copy()
-            result_dict.update(
-                {
-                    "사용량 패턴 기준값": monthly_references,
-                    "사용량 패턴 변동성": monthly_variabilities,
-                    "분포 분석 정보": monthly_analysis,
-                    "데이터 개수": len(group_df),
-                }
-            )
-            grouped_results.append(result_dict)
-
-        # 데이터프레임으로 변환
-        self.grouped_data = pd.DataFrame(grouped_results)
-
-        print(f"\n✅ 그룹화 완료: {len(self.grouped_data)}개 그룹")
-        print(f"그룹화 기준: {', '.join(group_columns)}")
-        return self.grouped_data
-
-    def group_and_calculate_with_heat(self, group_columns=["열량범위", "그룹", "용도"]):
-        """
-        열량 범위를 포함한 지정된 컬럼들을 기준으로 그룹화하고 적응형 통계 계산
-
-        Args:
-            group_columns (list): 그룹화할 컬럼명 리스트
-
-        Returns:
-            pd.DataFrame: 그룹화된 결과 데이터프레임
-        """
-        if self.df is None:
-            print("데이터가 로드되지 않았습니다.")
-            return None
-
-        # 열량 범위 컬럼 생성
-        if not self.create_heat_group_column():
+        # 등급 그룹 컬럼 생성
+        if not self.create_grade_group_column():
             return None
 
         # 필요한 컬럼들이 존재하는지 확인
@@ -643,6 +576,73 @@ class ExcelGroupProcessor:
         print(f"   - MAD조정: 변동성이 큰 데이터에 사용 (MAD 기반 robust 중심값)")
         print(f"{'='*80}")
 
+    def group_and_calculate(self, group_columns=["그룹", "용도"]):
+        """
+        지정된 컬럼들을 기준으로 그룹화하고 적응형 통계 계산
+
+        Args:
+            group_columns (list): 그룹화할 컬럼명 리스트
+
+        Returns:
+            pd.DataFrame: 그룹화된 결과 데이터프레임
+        """
+        if self.df is None:
+            print("데이터가 로드되지 않았습니다.")
+            return None
+
+        # 필요한 컬럼들이 존재하는지 확인
+        required_columns = group_columns + ["사용량_패턴"]
+        missing_columns = [
+            col for col in required_columns if col not in self.df.columns
+        ]
+
+        if missing_columns:
+            print(f"필요한 컬럼이 없습니다: {missing_columns}")
+            return None
+
+        # 그룹별로 데이터 처리
+        grouped_results = []
+
+        for group_value, group_df in self.df.groupby(group_columns):
+            # 다중 컬럼 그룹화의 경우 group_value가 튜플이므로 처리
+            if isinstance(group_value, tuple):
+                group_info = dict(zip(group_columns, group_value))
+            else:
+                group_info = {group_columns[0]: group_value}
+
+            print(f"\n🔍 그룹 분석 중: {group_info}")
+
+            # 사용량 패턴 파싱 및 적응형 통계 계산
+            usage_patterns = []
+            for pattern in group_df["사용량_패턴"]:
+                parsed_pattern = self.parse_usage_pattern(pattern)
+                if parsed_pattern:
+                    usage_patterns.append(parsed_pattern)
+
+            # 월별 적응형 기준값과 변동성 지표 계산
+            monthly_references, monthly_variabilities, monthly_analysis = (
+                self.calculate_adaptive_monthly_stats(usage_patterns)
+            )
+
+            # 결과 저장 (그룹 정보와 통계 정보 포함)
+            result_dict = group_info.copy()
+            result_dict.update(
+                {
+                    "사용량 패턴 기준값": monthly_references,
+                    "사용량 패턴 변동성": monthly_variabilities,
+                    "분포 분석 정보": monthly_analysis,
+                    "데이터 개수": len(group_df),
+                }
+            )
+            grouped_results.append(result_dict)
+
+        # 데이터프레임으로 변환
+        self.grouped_data = pd.DataFrame(grouped_results)
+
+        print(f"\n✅ 그룹화 완료: {len(self.grouped_data)}개 그룹")
+        print(f"그룹화 기준: {', '.join(group_columns)}")
+        return self.grouped_data
+
 
 def convert_df_to_dict(obj):
     if isinstance(obj, pd.DataFrame):
@@ -678,9 +678,9 @@ def main(input_file, output_file, group_columns, gt_json_path):
     return processor
 
 
-# 열량 범위를 고려한 그룹화
-def main_with_heat(input_file, output_file, group_columns, gt_json_path):
-    """열량 범위를 고려한 메인 실행 함수"""
+# 등급을 고려한 그룹화
+def main_with_grade(input_file, output_file, group_columns, gt_json_path):
+    """등급과 압력_그룹을 고려한 메인 실행 함수"""
     # 프로세서 초기화
     processor = ExcelGroupProcessor(input_file)
 
@@ -688,8 +688,8 @@ def main_with_heat(input_file, output_file, group_columns, gt_json_path):
     if not processor.load_data():
         return
 
-    # 열량 범위를 고려한 그룹화 및 평균/표준편차 계산
-    result = processor.group_and_calculate_with_heat(group_columns=group_columns)
+    # 등급과 압력_그룹을 고려한 그룹화 및 평균/표준편차 계산
+    result = processor.group_and_calculate_with_grade(group_columns=group_columns)
     results_serializable = convert_df_to_dict(result)
 
     # JSON 파일로 저장
@@ -709,18 +709,23 @@ if __name__ == "__main__":
     # 기본 설정
     input_file = "./group_biz_with_12.xlsx"
 
-    # 열량 범위를 고려한 그룹화 실행
-    print("\n🔥 열량 범위를 고려한 그룹과 용도별 그룹화 실행...")
-    output_file_heat = "./group_biz_with_usage_heat.xlsx"
-    gt_json_path_heat = "./group_biz_with_usage_heat_optimize.json"
-    group_columns_heat = ["열량범위", "그룹", "용도"]  # 열량범위, 그룹, 용도로 그룹화
-    processor_heat = main_with_heat(
-        input_file, output_file_heat, group_columns_heat, gt_json_path_heat
+    # 등급과 압력_그룹을 고려한 그룹화 실행
+    print("\n🏆 등급, 그룹, 용도, 압력_그룹별 그룹화 실행...")
+    output_file_grade = "./group_biz_with_usage_grade.xlsx"
+    gt_json_path_grade = "./group_biz_with_usage_grade_optimize.json"
+    group_columns_grade = [
+        "등급",
+        "그룹",
+        "용도",
+        "압력_그룹",
+    ]  # 등급, 그룹, 용도, 압력_그룹으로 그룹화
+    processor_grade = main_with_grade(
+        input_file, output_file_grade, group_columns_grade, gt_json_path_grade
     )
 
-    if processor_heat:
-        print("✅ 열량 범위를 고려한 그룹과 용도별 그룹화 완료")
-        processor_heat.display_results()
+    if processor_grade:
+        print("✅ 등급, 그룹, 용도, 압력_그룹을 고려한 그룹화 완료")
+        processor_grade.display_results()
 
     print("\n" + "=" * 80)
     print("           분석이 완료되었습니다! 🎉")

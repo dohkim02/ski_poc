@@ -47,7 +47,71 @@ class Analyze:
                 current_dir, "make_instruction", "group_index.json"
             )
 
-            print(f"Trying primary path: {ground_truth_path}")
+            print(f"=== DEBUGGING FILE SYSTEM ===")
+            print(f"Current working directory: {os.getcwd()}")
+            print(f"Current file (__file__): {__file__}")
+            print(f"Current file directory: {current_dir}")
+            print(f"Primary path: {ground_truth_path}")
+
+            # 파일 시스템 구조 확인
+            def explore_directory(path, max_depth=3, current_depth=0):
+                items = []
+                if current_depth >= max_depth:
+                    return items
+                try:
+                    for item in os.listdir(path):
+                        item_path = os.path.join(path, item)
+                        if os.path.isdir(item_path):
+                            items.append(f"{'  ' * current_depth}📁 {item}/")
+                            items.extend(
+                                explore_directory(
+                                    item_path, max_depth, current_depth + 1
+                                )
+                            )
+                        else:
+                            items.append(f"{'  ' * current_depth}📄 {item}")
+                except PermissionError:
+                    items.append(f"{'  ' * current_depth}❌ Permission denied")
+                except Exception as e:
+                    items.append(f"{'  ' * current_depth}❌ Error: {e}")
+                return items
+
+            print("\n=== EXPLORING FILE SYSTEM ===")
+            print("Root directory structure:")
+            root_items = explore_directory("/mount/src/ski_poc", max_depth=2)
+            for item in root_items[:20]:  # Limit output
+                print(item)
+
+            print(f"\nCurrent directory contents:")
+            current_items = explore_directory(current_dir, max_depth=2)
+            for item in current_items[:15]:
+                print(item)
+
+            # group_index.json 파일을 재귀적으로 찾기
+            print(f"\n=== SEARCHING FOR group_index.json ===")
+
+            def find_file(directory, filename):
+                found_paths = []
+                try:
+                    for root, dirs, files in os.walk(directory):
+                        if filename in files:
+                            found_paths.append(os.path.join(root, filename))
+                        # 너무 깊이 들어가지 않도록 제한
+                        if len(found_paths) > 5:
+                            break
+                except Exception as e:
+                    print(f"Error walking directory {directory}: {e}")
+                return found_paths
+
+            # 여러 루트에서 파일 찾기
+            search_roots = ["/mount/src/ski_poc", current_dir, os.getcwd()]
+            all_found_paths = []
+
+            for search_root in search_roots:
+                if os.path.exists(search_root):
+                    found = find_file(search_root, "group_index.json")
+                    all_found_paths.extend(found)
+                    print(f"Searching in {search_root}: {found}")
 
             # 파일이 존재하지 않으면 다른 경로들 시도
             if not os.path.exists(ground_truth_path):
@@ -55,31 +119,37 @@ class Analyze:
 
                 alternative_paths = [
                     "/mount/src/ski_poc/poc2/make_instruction/group_index.json",
+                    "/mount/src/ski_poc/make_instruction/group_index.json",
+                    os.path.join(
+                        current_dir,
+                        "..",
+                        "poc2",
+                        "make_instruction",
+                        "group_index.json",
+                    ),
                     os.path.join(os.getcwd(), "make_instruction", "group_index.json"),
                     "make_instruction/group_index.json",
                 ]
 
+                # 찾은 파일들도 시도
+                alternative_paths.extend(all_found_paths)
+
                 for alt_path in alternative_paths:
-                    print(f"Trying: {alt_path}")
+                    print(
+                        f"Trying: {alt_path} -> {'EXISTS' if os.path.exists(alt_path) else 'NOT FOUND'}"
+                    )
                     if os.path.exists(alt_path):
                         ground_truth_path = alt_path
                         print(f"SUCCESS: Found at {alt_path}")
                         break
                 else:
-                    # 모든 경로 실패시 디렉토리 내용 확인
-                    print(f"Current directory: {os.getcwd()}")
-                    print(f"Current file directory: {current_dir}")
-                    try:
-                        print(f"Contents of current dir: {os.listdir('.')}")
-                        if os.path.exists("make_instruction"):
-                            print(
-                                f"Contents of make_instruction: {os.listdir('make_instruction')}"
-                            )
-                    except Exception as e:
-                        print(f"Error listing contents: {e}")
+                    print(f"\n=== FINAL DEBUG INFO ===")
+                    print(f"Could not find group_index.json anywhere!")
+                    print(f"Searched paths: {alternative_paths}")
+                    print(f"Found files named group_index.json: {all_found_paths}")
 
                     raise FileNotFoundError(
-                        f"group_index.json not found in any location. Tried: {[ground_truth_path] + alternative_paths}"
+                        f"group_index.json not found. Tried paths: {alternative_paths}"
                     )
 
         print(f"Loading group_index.json from: {ground_truth_path}")

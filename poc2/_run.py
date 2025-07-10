@@ -31,13 +31,40 @@ class Analyze:
     def __init__(
         self,
         llm,
-        ground_truth_path=os.path.join(
-            os.path.dirname(__file__),
-            "make_instruction",
-            "group_index.json",
-        ),
+        ground_truth_path=None,
     ):
         self.llm = llm
+
+        # 여러 가능한 경로들을 시도
+        if ground_truth_path is None:
+            possible_paths = [
+                os.path.join(
+                    os.path.dirname(__file__), "make_instruction", "group_index.json"
+                ),
+                os.path.join(os.getcwd(), "make_instruction", "group_index.json"),
+                os.path.join(
+                    os.path.dirname(__file__),
+                    "..",
+                    "poc2",
+                    "make_instruction",
+                    "group_index.json",
+                ),
+                "make_instruction/group_index.json",
+                "./make_instruction/group_index.json",
+            ]
+
+            ground_truth_path = None
+            for path in possible_paths:
+                if os.path.exists(path):
+                    ground_truth_path = path
+                    print(f"Found group_index.json at: {path}")
+                    break
+
+            if ground_truth_path is None:
+                raise FileNotFoundError(
+                    f"group_index.json not found. Tried paths: {possible_paths}"
+                )
+
         self.ground_truth = get_json(ground_truth_path)
 
     # 업태와 업종을 기반으로 그룹 분류 후, 용도 파악하여 기준데이터 불러오기

@@ -13,7 +13,7 @@ from pathlib import Path
 from datetime import datetime
 
 # 필요한 모듈 import
-from _run import Analyze, main as run_main
+from _run import Analyze, main
 from _preprocess import excel_to_txt, preprocess_excel
 from utils import get_data_from_txt, get_previous_monthes
 import ast

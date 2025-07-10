@@ -542,49 +542,95 @@ def get_previous_monthes(years_data):
 
 
 def write_outlier(output_path, outlier_results):
-    with open(output_path, "w", encoding="utf-8") as f:
-        f.write(f"이상 데이터 분석 결과 ({len(outlier_results)}건)\n")
-        f.write("=" * 50 + "\n\n")
+    """
+    이상치 결과를 파일에 저장 (Streamlit Cloud 호환)
 
-        for i, item in enumerate(outlier_results, 1):
-            # ground_truth의 data_num 정보 추가
-            f.write(f"기준 데이터 샘플 수: {item['ground_truth']['data_num']}건\n")
-            f.write(f"기준 데이터: {item['standard_data']}\n")
-            f.write(f"입력 데이터: {item['comparison_input_data']}\n")
-            f.write("-" * 30 + "\n\n")
+    Args:
+        output_path: 출력 파일 경로 (None이면 임시 파일 생성)
+        outlier_results: 이상치 분석 결과 리스트
+    """
+    try:
+        # 출력 파일이 지정되지 않으면 임시 파일 생성
+        if output_path is None:
+            import tempfile
 
-    print(f"Outlier results saved to: {output_path}")
+            with tempfile.NamedTemporaryFile(
+                mode="w", suffix=".txt", delete=False, encoding="utf-8"
+            ) as tmp_file:
+                output_path = tmp_file.name
+
+        with open(output_path, "w", encoding="utf-8") as f:
+            f.write(f"이상 데이터 분석 결과 ({len(outlier_results)}건)\n")
+            f.write("=" * 50 + "\n\n")
+
+            for i, item in enumerate(outlier_results, 1):
+                # ground_truth의 data_num 정보 추가
+                f.write(f"기준 데이터 샘플 수: {item['ground_truth']['data_num']}건\n")
+                f.write(f"기준 데이터: {item['standard_data']}\n")
+                f.write(f"입력 데이터: {item['comparison_input_data']}\n")
+                f.write("-" * 30 + "\n\n")
+
+        print(f"💾 Outlier results saved to: {output_path}")
+        return output_path
+    except Exception as e:
+        print(f"❌ Error saving outlier results: {str(e)}")
+        return output_path
 
 
-def write_post_process(outlier_results):
-    if outlier_results and "pattern_result" in outlier_results[0]:
-        post_processing_output_path = os.path.join(
-            os.path.dirname(__file__), "outlier_results_post_processing.txt"
-        )
+def write_post_process(outlier_results, output_path=None):
+    """
+    후처리 결과를 파일에 저장 (Streamlit Cloud 호환)
 
-        # result_value == 'yes'인 케이스만 미리 필터링
-        filtered_results = []
-        for item in outlier_results:
-            pattern_result = item["pattern_result"]
-            result_value = getattr(pattern_result, "result", None)
-            if result_value is None and isinstance(pattern_result, dict):
-                result_value = pattern_result.get("result")
-            if result_value == "yes":
-                filtered_results.append(item)
+    Args:
+        outlier_results: 이상치 분석 결과 리스트
+        output_path: 출력 파일 경로 (None이면 임시 파일 생성)
+    """
+    try:
+        if outlier_results and "pattern_result" in outlier_results[0]:
+            # 출력 파일이 지정되지 않으면 임시 파일 생성
+            if output_path is None:
+                import tempfile
 
-        with open(post_processing_output_path, "w", encoding="utf-8") as f:
-            f.write(f"후처리 후 분석 결과: {len(filtered_results)}건\n")
-            f.write("=" * 60 + "\n\n")
-            for i, item in enumerate(filtered_results, 1):
+                with tempfile.NamedTemporaryFile(
+                    mode="w",
+                    suffix="_post_processing.txt",
+                    delete=False,
+                    encoding="utf-8",
+                ) as tmp_file:
+                    output_path = tmp_file.name
+
+            # result_value == 'yes'인 케이스만 미리 필터링
+            filtered_results = []
+            for item in outlier_results:
                 pattern_result = item["pattern_result"]
                 result_value = getattr(pattern_result, "result", None)
-                reason_value = getattr(pattern_result, "reason", None)
                 if result_value is None and isinstance(pattern_result, dict):
                     result_value = pattern_result.get("result")
-                    reason_value = pattern_result.get("reason")
-                f.write(f"[{i}번째 케이스]\n")
-                f.write(f"기준 데이터: {item['ground_truth']}\n")
-                f.write(f"입력 데이터: {item['input_data']}\n")
-                f.write(f"결과: {result_value}\n")
-                f.write(f"이유: {reason_value}\n")
-                f.write("-" * 50 + "\n\n")
+                if result_value == "yes":
+                    filtered_results.append(item)
+
+            with open(output_path, "w", encoding="utf-8") as f:
+                f.write(f"후처리 후 분석 결과: {len(filtered_results)}건\n")
+                f.write("=" * 60 + "\n\n")
+                for i, item in enumerate(filtered_results, 1):
+                    pattern_result = item["pattern_result"]
+                    result_value = getattr(pattern_result, "result", None)
+                    reason_value = getattr(pattern_result, "reason", None)
+                    if result_value is None and isinstance(pattern_result, dict):
+                        result_value = pattern_result.get("result")
+                        reason_value = pattern_result.get("reason")
+                    f.write(f"[{i}번째 케이스]\n")
+                    f.write(f"기준 데이터: {item['ground_truth']}\n")
+                    f.write(f"입력 데이터: {item['input_data']}\n")
+                    f.write(f"결과: {result_value}\n")
+                    f.write(f"이유: {reason_value}\n")
+                    f.write("-" * 50 + "\n\n")
+
+            print(f"💾 Post-processing results saved to: {output_path}")
+            return output_path
+        else:
+            print("⚠️  No pattern results found for post-processing")
+            return None
+    except Exception as e:
+        print(f"❌ Error saving post-processing results: {str(e)}")
+        return output_path

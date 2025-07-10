@@ -18,10 +18,17 @@ from _preprocess import excel_to_txt, preprocess_excel
 from utils import get_data_from_txt, get_previous_monthes
 import ast
 
-# 모델 경로 설정
-MODEL_PATH = os.path.abspath("../")
-sys.path.append(MODEL_PATH)
-from model import initialize_llm
+# 모델 경로 설정 - Streamlit Cloud 호환 방식으로 변경
+# MODEL_PATH = os.path.abspath("../")  # 제거
+# sys.path.append(MODEL_PATH)
+
+# 현재 디렉토리 기준으로 모델 import (Streamlit Cloud 호환)
+try:
+    from model import initialize_llm
+except ImportError:
+    # 상위 디렉토리에서 찾기
+    sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    from model import initialize_llm
 
 # Streamlit 페이지 설정
 st.set_page_config(page_title="이상치 분석 시스템", page_icon="📊", layout="wide")
@@ -809,45 +816,55 @@ def main():
                         delete=False, suffix=".xlsx"
                     ) as preprocessed_excel_file:
                         # 1단계: preprocess_excel 실행 (Excel → 전처리된 Excel)
-                        preprocess_excel(temp_excel_path, preprocessed_excel_file.name)
+                        preprocessed_excel_path = preprocess_excel(
+                            temp_excel_path, preprocessed_excel_file.name
+                        )
+
+                        st.sidebar.info(f"✅ 1단계 완료: {preprocessed_excel_path}")
 
                         # 2단계: excel_to_txt 실행 (전처리된 Excel → TXT)
                         with tempfile.NamedTemporaryFile(
                             delete=False, suffix=".txt", mode="w", encoding="utf-8"
                         ) as preprocessed_txt_file:
+                            # 파일을 닫고 경로만 사용
+                            preprocessed_txt_file.close()
                             preprocessed_path = excel_to_txt(
-                                preprocessed_excel_file.name, preprocessed_txt_file.name
+                                preprocessed_excel_path, preprocessed_txt_file.name
                             )
 
-                    st.sidebar.success("전처리 완료!")
+                    st.sidebar.success("✅ 전처리 완료!")
                     st.session_state.preprocessed_path = preprocessed_path
 
                     # 디버깅 정보 표시
-                    st.sidebar.info(f"전처리된 파일 경로: {preprocessed_path}")
+                    st.sidebar.info(f"📁 전처리된 파일 경로: {preprocessed_path}")
 
                     # 전처리된 데이터 미리보기
                     try:
                         with open(preprocessed_path, "r", encoding="utf-8") as f:
                             lines = f.readlines()
-                            st.sidebar.success(f"전처리된 데이터 라인 수: {len(lines)}")
+                            st.sidebar.success(
+                                f"📊 전처리된 데이터 라인 수: {len(lines)}"
+                            )
                             if len(lines) > 0:
                                 # 첫 번째 라인을 JSON으로 파싱해서 키 확인
-                                import json
-
                                 first_item = json.loads(lines[0].strip())
                                 st.sidebar.info(
-                                    f"데이터 키들: {list(first_item.keys())}"
+                                    f"🔍 데이터 키들: {list(first_item.keys())}"
                                 )
+
+                                # 샘플 데이터 일부 표시
+                                if len(lines) >= 3:
+                                    st.sidebar.info(f"📄 샘플 3줄 처리됨")
                     except Exception as preview_error:
                         st.sidebar.warning(
-                            f"데이터 미리보기 실패: {str(preview_error)}"
+                            f"⚠️  데이터 미리보기 실패: {str(preview_error)}"
                         )
 
                 except Exception as e:
-                    st.sidebar.error(f"전처리 중 오류: {str(e)}")
+                    st.sidebar.error(f"❌ 전처리 중 오류: {str(e)}")
                     import traceback
 
-                    st.sidebar.error(f"상세 오류: {traceback.format_exc()}")
+                    st.sidebar.error(f"📄 상세 오류: {traceback.format_exc()}")
 
         # 분석 실행
         st.sidebar.subheader("3. 분석 실행")

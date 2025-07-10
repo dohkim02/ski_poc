@@ -22,10 +22,15 @@ import asyncio
 from tqdm import tqdm
 import pandas as pd
 import ast
+import tempfile
 
-MODEL_PATH = os.path.abspath("../")  # 예: 한 단계 바깥 폴더
-sys.path.append(MODEL_PATH)
-from model import initialize_llm
+# 모델 경로 설정 - Streamlit Cloud 호환
+try:
+    from model import initialize_llm
+except ImportError:
+    # 상위 디렉토리에서 찾기
+    sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    from model import initialize_llm
 
 
 class Analyze:
@@ -36,39 +41,49 @@ class Analyze:
     ):
         self.llm = llm
 
-        # 간단한 방법: 루트 디렉토리에 복사된 파일 사용
+        # Streamlit Cloud 호환 방식으로 ground_truth 파일 찾기
         if ground_truth_path is None:
-            # 현재 파일과 같은 디렉토리에서 group_index.json 찾기
             current_dir = os.path.dirname(os.path.abspath(__file__))
 
-            # 여러 가능한 위치 시도 (간단한 순서)
+            # 가능한 파일 위치들 (Streamlit Cloud에서 더 안전한 순서)
             possible_locations = [
-                os.path.join(current_dir, "group_index.json"),  # 루트에 복사된 파일
+                os.path.join(current_dir, "group_index.json"),  # 같은 디렉토리
                 os.path.join(
                     current_dir, "make_instruction", "group_index.json"
-                ),  # 원본 위치
+                ),  # 하위 디렉토리
                 "group_index.json",  # 현재 작업 디렉토리
                 "make_instruction/group_index.json",  # 상대 경로
+                os.path.join(
+                    os.getcwd(), "group_index.json"
+                ),  # 현재 작업 디렉토리 절대경로
+                os.path.join(os.getcwd(), "poc2", "group_index.json"),  # poc2 디렉토리
             ]
 
-            print(f"Looking for group_index.json in the following locations:")
+            print(f"🔍 Looking for group_index.json in the following locations:")
             for i, path in enumerate(possible_locations, 1):
                 exists = os.path.exists(path)
                 print(f"  {i}. {path} -> {'✓ FOUND' if exists else '✗ NOT FOUND'}")
                 if exists:
                     ground_truth_path = path
+                    print(f"✅ Using ground_truth file: {ground_truth_path}")
                     break
 
             if ground_truth_path is None:
-                # 최후의 수단: 파일을 찾을 수 없으면 빈 딕셔너리로 초기화
+                # 최후의 수단: 기본 구조로 빈 딕셔너리 초기화
                 print(
-                    "WARNING: group_index.json not found anywhere. Using empty ground truth."
+                    "⚠️  WARNING: group_index.json not found. Creating empty ground truth."
                 )
-                self.ground_truth = {}
                 return
 
-        print(f"✓ Loading group_index.json from: {ground_truth_path}")
-        self.ground_truth = get_json(ground_truth_path)
+        try:
+            print(f"📄 Loading group_index.json from: {ground_truth_path}")
+            self.ground_truth = get_json(ground_truth_path)
+            print(
+                f"✅ Ground truth loaded successfully with {len(self.ground_truth)} entries"
+            )
+        except Exception as e:
+            print(f"❌ Error loading ground truth file: {str(e)}")
+            print("🔄 Falling back to default ground truth")
 
     # 업태와 업종을 기반으로 그룹 분류 후, 용도 파악하여 기준데이터 불러오기
     async def classify_llm(self, data):
@@ -107,6 +122,18 @@ class Analyze:
         ground_truth = get_group_usage_info(
             self.ground_truth, grade, category, usage, pressure
         )
+
+        # ground_truth가 문자열인 경우 (에러 메시지) 기본 딕셔너리 반환
+        if isinstance(ground_truth, str):
+            print(
+                f"Warning: get_group_usage_info returned error message: {ground_truth}"
+            )
+            # 기본 구조를 가진 딕셔너리 반환
+            return {
+                "category": f"({grade}, {category}, {usage}, {pressure})",
+                "standard": {},
+                "data_num": 0,
+            }
 
         return ground_truth
 
@@ -445,16 +472,38 @@ class Analyze:
 # 사용 예시:
 async def main():
     llm = initialize_llm("langchain_gpt4o")
-    data_lst = get_data_from_txt(
-        os.path.join(os.path.dirname(__file__), "preprocessed.txt")
-    )
 
-    print(f"Total items to process: {len(data_lst)}")
+    # Streamlit Cloud 호환: 임시 파일로 데이터 처리
+    try:
+        # 현재 디렉토리에서 preprocessed.txt 찾기
+        current_dir = os.path.dirname(__file__)
+        possible_data_paths = [
+            os.path.join(current_dir, "preprocessed.txt"),
+            "preprocessed.txt",
+            os.path.join(os.getcwd(), "preprocessed.txt"),
+            os.path.join(os.getcwd(), "poc2", "preprocessed.txt"),
+        ]
+
+        data_file_path = None
+        for path in possible_data_paths:
+            if os.path.exists(path):
+                data_file_path = path
+                break
+
+        if data_file_path is None:
+            print("❌ preprocessed.txt file not found in any expected location")
+            return []
+
+        print(f"📄 Loading data from: {data_file_path}")
+        data_lst = get_data_from_txt(data_file_path)
+        print(f"✅ Loaded {len(data_lst)} items")
+    except Exception as e:
+        print(f"❌ Error loading data: {str(e)}")
+        return []
+
+    print(f"🔄 Total items to process: {len(data_lst)}")
 
     analyzer = Analyze(llm)
-    # import pdb
-
-    # pdb.set_trace()
     results = await analyzer.run_biz_judge(data_lst)
 
     # '이상'인 결과만 필터링 (judge_result가 비어있지 않은 경우)
@@ -462,26 +511,25 @@ async def main():
         item for item in results if item["judge_result"]  # 빈 리스트가 아닌 경우
     ]
 
-    # with open("./post_test.txt", "r", encoding="utf-8") as f:
-    #     text = f.read()
-    # outlier_results = ast.literal_eval(text)
-
     # outlier_results에 대해 pattern_checker 병렬 실행
     if outlier_results:
-        print(f"Running pattern check on {len(outlier_results)} outlier cases...")
+        print(f"🔍 Running pattern check on {len(outlier_results)} outlier cases...")
         outlier_results = await analyzer.run_pattern_check(outlier_results)
 
-    # print(
-    #     f"Found {len(outlier_results)} outlier cases out of {len(results)} total cases"
-    # )
+    # Streamlit Cloud 호환: 임시 파일로 결과 저장
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".txt", delete=False, encoding="utf-8"
+        ) as tmp_file:
+            output_path = tmp_file.name
+            write_outlier(output_path, outlier_results)
+            print(f"💾 Outlier results saved to temp file: {output_path}")
 
-    # # txt 파일로 저장
-    output_path = os.path.join(os.path.dirname(__file__), "outlier_results.txt")
-    write_outlier(output_path, outlier_results)
-    print(f"Outlier results saved to: {output_path}")
-    # pattern_checker 결과가 있는 경우 추가 분석 결과 저장
-    write_post_process(outlier_results)
-    # return results
+        # pattern_checker 결과가 있는 경우 추가 분석 결과 저장
+        write_post_process(outlier_results)
+    except Exception as e:
+        print(f"⚠️  Warning: Could not save results to file: {str(e)}")
+
     return results
 
 

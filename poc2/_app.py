@@ -1150,9 +1150,9 @@ def check_environment():
     errors = []
 
     # OpenAI API 키 확인
-    api_key = os.environ.get("OPENAI_API_KEY")
+    api_key = os.environ.get("AZURE_OPENAI_API_KEY")
     if not api_key:
-        errors.append("🔑 OPENAI_API_KEY 환경변수가 설정되지 않았습니다")
+        errors.append("🔑 AZURE_OPENAI_API_KEY 환경변수가 설정되지 않았습니다")
     elif len(api_key) < 10:  # 최소 길이 확인
         errors.append("🔑 OPENAI_API_KEY가 올바르지 않을 수 있습니다 (너무 짧음)")
 

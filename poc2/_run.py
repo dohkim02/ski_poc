@@ -40,6 +40,7 @@ class Analyze:
         ground_truth_path=None,
     ):
         self.llm = llm
+        self.ground_truth = None  # 항상 속성 생성
 
         # Streamlit Cloud 호환 방식으로 ground_truth 파일 찾기
         if ground_truth_path is None:
@@ -73,6 +74,7 @@ class Analyze:
                 print(
                     "⚠️  WARNING: group_index.json not found. Creating empty ground truth."
                 )
+                self.ground_truth = self._create_default_ground_truth()
                 return
 
         try:
@@ -84,6 +86,36 @@ class Analyze:
         except Exception as e:
             print(f"❌ Error loading ground truth file: {str(e)}")
             print("🔄 Falling back to default ground truth")
+            self.ground_truth = self._create_default_ground_truth()
+
+    def _create_default_ground_truth(self):
+        """기본 ground truth 구조 생성"""
+        return {
+            "A": {
+                "건설업": {
+                    "일반용1": {
+                        "저압": {
+                            "category": "건설업",
+                            "standard": {
+                                "1월": 100,
+                                "2월": 100,
+                                "3월": 100,
+                                "4월": 100,
+                                "5월": 100,
+                                "6월": 100,
+                                "7월": 100,
+                                "8월": 100,
+                                "9월": 100,
+                                "10월": 100,
+                                "11월": 100,
+                                "12월": 100,
+                            },
+                            "data_num": 10,
+                        }
+                    }
+                }
+            }
+        }
 
     # 업태와 업종을 기반으로 그룹 분류 후, 용도 파악하여 기준데이터 불러오기
     async def classify_llm(self, data):

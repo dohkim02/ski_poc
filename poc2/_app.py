@@ -11,6 +11,12 @@ import sys
 import tempfile
 from pathlib import Path
 from datetime import datetime
+import traceback
+import logging
+
+# 로깅 설정 추가
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # 필요한 모듈 import
 from _run import Analyze, main
@@ -286,20 +292,77 @@ def create_all_cases_chart(filtered_results):
 async def run_analysis(data_file_path):
     """분석 실행"""
     try:
+        # 상세 로깅 시작
+        st.info(f"🔍 분석 시작: {data_file_path}")
+        logger.info(f"Analysis started with file: {data_file_path}")
+
+        # 파일 존재 확인
+        if not os.path.exists(data_file_path):
+            error_msg = f"❌ 파일이 존재하지 않습니다: {data_file_path}"
+            st.error(error_msg)
+            logger.error(error_msg)
+            return None, None
+
+        # 파일 크기 확인
+        file_size = os.path.getsize(data_file_path)
+        st.info(f"📁 파일 크기: {file_size} bytes")
+        logger.info(f"File size: {file_size} bytes")
+
         # LLM 초기화
         with st.spinner("LLM 모델을 초기화하는 중..."):
-            llm = initialize_llm("langchain_gpt4o")
+            try:
+                st.info("🤖 LLM 모델 초기화 시도...")
+                logger.info("Attempting to initialize LLM...")
+                llm = initialize_llm("langchain_gpt4o")
+                st.success("✅ LLM 모델 초기화 완료")
+                logger.info("LLM initialization successful")
+            except Exception as llm_error:
+                error_msg = f"❌ LLM 초기화 실패: {str(llm_error)}"
+                st.error(error_msg)
+                st.error(f"🔍 LLM 에러 상세: {traceback.format_exc()}")
+                logger.error(f"LLM initialization failed: {error_msg}")
+                logger.error(f"LLM error traceback: {traceback.format_exc()}")
+                return None, None
 
         # 데이터 로드
         with st.spinner("데이터를 로드하는 중..."):
-            data_lst = get_data_from_txt(data_file_path)
+            try:
+                st.info("📊 데이터 로드 시도...")
+                logger.info("Attempting to load data...")
+                data_lst = get_data_from_txt(data_file_path)
+                st.success(f"✅ 데이터 로드 완료: {len(data_lst)}개")
+                logger.info(f"Data load successful: {len(data_lst)} items")
+
+                # 첫 번째 데이터 샘플 로깅
+                if data_lst:
+                    st.info(f"🔍 첫 번째 데이터 키들: {list(data_lst[0].keys())}")
+                    logger.info(f"First data item keys: {list(data_lst[0].keys())}")
+
+            except Exception as data_error:
+                error_msg = f"❌ 데이터 로드 실패: {str(data_error)}"
+                st.error(error_msg)
+                st.error(f"🔍 데이터 로드 에러 상세: {traceback.format_exc()}")
+                logger.error(f"Data load failed: {error_msg}")
+                logger.error(f"Data load error traceback: {traceback.format_exc()}")
+                return None, None
 
         st.success(f"총 {len(data_lst)}개의 데이터를 로드했습니다.")
 
-        analyzer = Analyze(llm)
+        try:
+            analyzer = Analyze(llm)
+            st.info("✅ Analyzer 객체 생성 완료")
+            logger.info("Analyzer object created successfully")
+        except Exception as analyzer_error:
+            error_msg = f"❌ Analyzer 생성 실패: {str(analyzer_error)}"
+            st.error(error_msg)
+            st.error(f"🔍 Analyzer 에러 상세: {traceback.format_exc()}")
+            logger.error(f"Analyzer creation failed: {error_msg}")
+            logger.error(f"Analyzer error traceback: {traceback.format_exc()}")
+            return None, None
 
         # 1차 분석 실행
         st.info("🔍 1차 분석을 시작합니다...")
+        logger.info("Starting primary analysis...")
 
         # 프로그레스 바와 상태 표시를 위한 컨테이너
         progress_container = st.container()
@@ -312,43 +375,113 @@ async def run_analysis(data_file_path):
             """프로그레스 바와 함께 1차 분석 실행"""
             results = []
             total = len(data_lst)
+            failed_count = 0
 
             # 세마포어로 동시 실행 수 제한
             semaphore = asyncio.Semaphore(50)
 
             async def process_with_streamlit_progress(data_item, index):
                 async with semaphore:
-                    result = await analyzer.process_single_item(data_item)
-                    # Streamlit 프로그레스 바 업데이트
-                    progress = (index + 1) / total
-                    progress_bar.progress(progress)
-                    status_text.text(f"처리 중: {index + 1}/{total} ({progress:.1%})")
-                    return result
+                    try:
+                        result = await analyzer.process_single_item(data_item)
+                        # Streamlit 프로그레스 바 업데이트
+                        progress = (index + 1) / total
+                        progress_bar.progress(progress)
+                        status_text.text(
+                            f"처리 중: {index + 1}/{total} ({progress:.1%})"
+                        )
+                        return result
+                    except Exception as process_error:
+                        nonlocal failed_count
+                        failed_count += 1
+                        logger.error(
+                            f"Failed to process item {index}: {str(process_error)}"
+                        )
+                        logger.error(
+                            f"Process error traceback: {traceback.format_exc()}"
+                        )
+                        # 실패한 경우에도 프로그레스 업데이트
+                        progress = (index + 1) / total
+                        progress_bar.progress(progress)
+                        status_text.text(
+                            f"처리 중 (실패 {failed_count}개): {index + 1}/{total} ({progress:.1%})"
+                        )
+                        return None
 
             # 모든 작업을 비동기로 실행
-            tasks = [
-                process_with_streamlit_progress(data_item, i)
-                for i, data_item in enumerate(data_lst)
-            ]
-            results = await asyncio.gather(*tasks)
+            try:
+                tasks = [
+                    process_with_streamlit_progress(data_item, i)
+                    for i, data_item in enumerate(data_lst)
+                ]
+                results = await asyncio.gather(*tasks, return_exceptions=True)
 
-            return results
+                # None이나 예외 결과 필터링
+                valid_results = []
+                for i, result in enumerate(results):
+                    if isinstance(result, Exception):
+                        logger.error(f"Task {i} failed with exception: {str(result)}")
+                        logger.error(f"Exception traceback: {traceback.format_exc()}")
+                    elif result is not None:
+                        valid_results.append(result)
 
-        results = await run_biz_judge_with_progress(data_lst)
+                logger.info(
+                    f"Primary analysis completed: {len(valid_results)} valid results out of {len(results)} total"
+                )
+                return valid_results
+
+            except Exception as gather_error:
+                error_msg = f"❌ 비동기 처리 중 오류: {str(gather_error)}"
+                st.error(error_msg)
+                st.error(f"🔍 비동기 처리 에러 상세: {traceback.format_exc()}")
+                logger.error(f"Async gather failed: {error_msg}")
+                logger.error(f"Async gather error traceback: {traceback.format_exc()}")
+                return []
+
+        try:
+            results = await run_biz_judge_with_progress(data_lst)
+
+            if not results:
+                error_msg = "❌ 1차 분석에서 유효한 결과를 얻지 못했습니다."
+                st.error(error_msg)
+                logger.error(error_msg)
+                return None, None
+
+        except Exception as primary_analysis_error:
+            error_msg = f"❌ 1차 분석 실행 중 오류: {str(primary_analysis_error)}"
+            st.error(error_msg)
+            st.error(f"🔍 1차 분석 에러 상세: {traceback.format_exc()}")
+            logger.error(f"Primary analysis execution failed: {error_msg}")
+            logger.error(f"Primary analysis error traceback: {traceback.format_exc()}")
+            return None, None
 
         # 완료 상태 업데이트
-        status_text.text(f"✅ 1차 분석 완료: {len(data_lst)}개 처리됨")
+        status_text.text(f"✅ 1차 분석 완료: {len(results)}개 처리됨")
+        logger.info(f"Primary analysis completed: {len(results)} items processed")
 
         # 이상치 필터링
-        outlier_results = [item for item in results if item["judge_result"]]
-
-        st.success(
-            f"1차 분석 완료: {len(outlier_results)}개의 이상치가 발견되었습니다."
-        )
+        try:
+            outlier_results = [
+                item for item in results if item.get("judge_result", False)
+            ]
+            st.success(
+                f"1차 분석 완료: {len(outlier_results)}개의 이상치가 발견되었습니다."
+            )
+            logger.info(
+                f"Outlier filtering completed: {len(outlier_results)} outliers found"
+            )
+        except Exception as filter_error:
+            error_msg = f"❌ 이상치 필터링 중 오류: {str(filter_error)}"
+            st.error(error_msg)
+            st.error(f"🔍 필터링 에러 상세: {traceback.format_exc()}")
+            logger.error(f"Outlier filtering failed: {error_msg}")
+            logger.error(f"Filter error traceback: {traceback.format_exc()}")
+            return results, []
 
         # 2차 패턴 체크
         if outlier_results:
             st.info("🔍 2차 패턴 체크를 시작합니다...")
+            logger.info("Starting secondary pattern check...")
 
             # 2차 분석용 프로그레스 바
             progress_container2 = st.container()
@@ -360,22 +493,35 @@ async def run_analysis(data_file_path):
                 """프로그레스 바와 함께 2차 패턴 체크 실행"""
                 results = []
                 total = len(outlier_results)
+                failed_count = 0
 
                 # 세마포어로 동시 실행 수 제한
                 semaphore = asyncio.Semaphore(50)
 
                 async def process_pattern_check_with_progress(outlier_item, index):
                     async with semaphore:
-                        # _run.py와 동일한 방식으로 수정
-                        years_data = outlier_item["input_data"]["3년치 데이터"]
+                        try:
+                            # _run.py와 동일한 방식으로 수정
+                            years_data = outlier_item["input_data"]["3년치 데이터"]
 
-                        # 안전한 데이터 변환
-                        if isinstance(years_data, str):
-                            try:
-                                years_data = ast.literal_eval(years_data)
-                            except (ValueError, SyntaxError):
-                                print(
-                                    f"Warning: Could not parse years_data: {years_data}"
+                            # 안전한 데이터 변환
+                            if isinstance(years_data, str):
+                                try:
+                                    years_data = ast.literal_eval(years_data)
+                                except (ValueError, SyntaxError) as parse_error:
+                                    logger.warning(
+                                        f"Could not parse years_data for item {index}: {str(parse_error)}"
+                                    )
+                                    progress = (index + 1) / total
+                                    progress_bar2.progress(progress)
+                                    status_text2.text(
+                                        f"패턴 체크 중: {index + 1}/{total} ({progress:.1%})"
+                                    )
+                                    result_item = outlier_item.copy()
+                                    return result_item
+                            elif not isinstance(years_data, dict):
+                                logger.warning(
+                                    f"years_data is not a valid format for item {index}: {type(years_data)}"
                                 )
                                 progress = (index + 1) / total
                                 progress_bar2.progress(progress)
@@ -384,51 +530,126 @@ async def run_analysis(data_file_path):
                                 )
                                 result_item = outlier_item.copy()
                                 return result_item
-                        elif not isinstance(years_data, dict):
-                            print(
-                                f"Warning: years_data is not a valid format: {type(years_data)}"
-                            )
+
+                            pattern_result = await analyzer.pattern_checker(years_data)
+
+                            # Streamlit 프로그레스 바 업데이트
                             progress = (index + 1) / total
                             progress_bar2.progress(progress)
                             status_text2.text(
                                 f"패턴 체크 중: {index + 1}/{total} ({progress:.1%})"
                             )
+
+                            # 기존 outlier_item에 pattern_result 추가
                             result_item = outlier_item.copy()
+                            result_item["pattern_result"] = pattern_result
                             return result_item
 
-                        pattern_result = await analyzer.pattern_checker(years_data)
+                        except Exception as pattern_error:
+                            nonlocal failed_count
+                            failed_count += 1
+                            logger.error(
+                                f"Pattern check failed for item {index}: {str(pattern_error)}"
+                            )
+                            logger.error(
+                                f"Pattern check error traceback: {traceback.format_exc()}"
+                            )
 
-                        # Streamlit 프로그레스 바 업데이트
-                        progress = (index + 1) / total
-                        progress_bar2.progress(progress)
-                        status_text2.text(
-                            f"패턴 체크 중: {index + 1}/{total} ({progress:.1%})"
-                        )
+                            progress = (index + 1) / total
+                            progress_bar2.progress(progress)
+                            status_text2.text(
+                                f"패턴 체크 중 (실패 {failed_count}개): {index + 1}/{total} ({progress:.1%})"
+                            )
 
-                        # 기존 outlier_item에 pattern_result 추가
-                        result_item = outlier_item.copy()
-                        result_item["pattern_result"] = pattern_result
-                        return result_item
+                            # 실패한 경우에도 기본 결과 반환
+                            result_item = outlier_item.copy()
+                            result_item["pattern_result"] = {
+                                "result": "error",
+                                "reason": f"패턴 체크 실패: {str(pattern_error)}",
+                            }
+                            return result_item
 
                 # 모든 작업을 비동기로 실행
-                tasks = [
-                    process_pattern_check_with_progress(outlier_item, i)
-                    for i, outlier_item in enumerate(outlier_results)
-                ]
-                results = await asyncio.gather(*tasks)
+                try:
+                    tasks = [
+                        process_pattern_check_with_progress(outlier_item, i)
+                        for i, outlier_item in enumerate(outlier_results)
+                    ]
+                    results = await asyncio.gather(*tasks, return_exceptions=True)
 
-                return results
+                    # 예외 처리
+                    valid_results = []
+                    for i, result in enumerate(results):
+                        if isinstance(result, Exception):
+                            logger.error(
+                                f"Pattern check task {i} failed with exception: {str(result)}"
+                            )
+                            logger.error(
+                                f"Exception traceback: {traceback.format_exc()}"
+                            )
+                            # 실패한 경우에도 기본 결과 추가
+                            fallback_item = outlier_results[i].copy()
+                            fallback_item["pattern_result"] = {
+                                "result": "error",
+                                "reason": f"패턴 체크 예외: {str(result)}",
+                            }
+                            valid_results.append(fallback_item)
+                        else:
+                            valid_results.append(result)
 
-            outlier_results = await run_pattern_check_with_progress(outlier_results)
+                    logger.info(
+                        f"Pattern check completed: {len(valid_results)} results processed"
+                    )
+                    return valid_results
 
-            # 완료 상태 업데이트
-            status_text2.text(f"✅ 2차 패턴 체크 완료: {len(outlier_results)}개 처리됨")
-            st.success("2차 패턴 체크 완료!")
+                except Exception as pattern_gather_error:
+                    error_msg = (
+                        f"❌ 패턴 체크 비동기 처리 중 오류: {str(pattern_gather_error)}"
+                    )
+                    st.error(error_msg)
+                    st.error(f"🔍 패턴 체크 비동기 에러 상세: {traceback.format_exc()}")
+                    logger.error(f"Pattern check async gather failed: {error_msg}")
+                    logger.error(
+                        f"Pattern check gather error traceback: {traceback.format_exc()}"
+                    )
+                    return outlier_results  # 원본 결과라도 반환
 
+            try:
+                outlier_results = await run_pattern_check_with_progress(outlier_results)
+
+                # 완료 상태 업데이트
+                status_text2.text(
+                    f"✅ 2차 패턴 체크 완료: {len(outlier_results)}개 처리됨"
+                )
+                st.success("2차 패턴 체크 완료!")
+                logger.info(
+                    f"Secondary pattern check completed: {len(outlier_results)} items processed"
+                )
+
+            except Exception as pattern_check_error:
+                error_msg = f"❌ 2차 패턴 체크 실행 중 오류: {str(pattern_check_error)}"
+                st.error(error_msg)
+                st.error(f"🔍 2차 패턴 체크 에러 상세: {traceback.format_exc()}")
+                logger.error(f"Secondary pattern check execution failed: {error_msg}")
+                logger.error(f"Pattern check error traceback: {traceback.format_exc()}")
+
+        logger.info("Analysis completed successfully")
         return results, outlier_results
 
     except Exception as e:
-        st.error(f"분석 중 오류가 발생했습니다: {str(e)}")
+        error_msg = f"❌ 분석 중 전체적인 오류가 발생했습니다: {str(e)}"
+        st.error(error_msg)
+        st.error(f"🔍 전체 에러 상세 정보:")
+        st.error(f"📄 에러 타입: {type(e).__name__}")
+        st.error(f"📄 에러 메시지: {str(e)}")
+        st.error(f"📄 상세 트레이스백:")
+        st.code(traceback.format_exc())
+
+        logger.error(f"Overall analysis failed: {error_msg}")
+        logger.error(f"Error type: {type(e).__name__}")
+        logger.error(f"Error message: {str(e)}")
+        logger.error(f"Full traceback: {traceback.format_exc()}")
+
         return None, None
 
 
@@ -811,87 +1032,231 @@ def main():
         if st.sidebar.button("전처리 실행"):
             with st.spinner("데이터를 전처리하는 중..."):
                 try:
+                    st.sidebar.info("🔄 전처리 단계 시작...")
+                    logger.info("Preprocessing started")
+
                     # Streamlit Cloud 호환을 위해 모든 파일을 tempfile로 처리
                     with tempfile.NamedTemporaryFile(
                         delete=False, suffix=".xlsx"
                     ) as preprocessed_excel_file:
                         # 1단계: preprocess_excel 실행 (Excel → 전처리된 Excel)
-                        preprocessed_excel_path = preprocess_excel(
-                            temp_excel_path, preprocessed_excel_file.name
-                        )
+                        st.sidebar.info("📊 1단계: Excel 전처리 중...")
+                        logger.info("Step 1: Excel preprocessing")
 
-                        st.sidebar.info(f"✅ 1단계 완료: {preprocessed_excel_path}")
+                        try:
+                            preprocessed_excel_path = preprocess_excel(
+                                temp_excel_path, preprocessed_excel_file.name
+                            )
+                            st.sidebar.success(
+                                f"✅ 1단계 완료: {preprocessed_excel_path}"
+                            )
+                            logger.info(f"Step 1 completed: {preprocessed_excel_path}")
+                        except Exception as excel_error:
+                            error_msg = f"❌ Excel 전처리 실패: {str(excel_error)}"
+                            st.sidebar.error(error_msg)
+                            st.sidebar.error(
+                                f"🔍 Excel 전처리 에러 상세: {traceback.format_exc()}"
+                            )
+                            logger.error(f"Excel preprocessing failed: {error_msg}")
+                            logger.error(
+                                f"Excel preprocessing error traceback: {traceback.format_exc()}"
+                            )
+                            raise
 
                         # 2단계: excel_to_txt 실행 (전처리된 Excel → TXT)
+                        st.sidebar.info("📝 2단계: TXT 변환 중...")
+                        logger.info("Step 2: Converting to TXT")
+
                         with tempfile.NamedTemporaryFile(
                             delete=False, suffix=".txt", mode="w", encoding="utf-8"
                         ) as preprocessed_txt_file:
                             # 파일을 닫고 경로만 사용
                             preprocessed_txt_file.close()
-                            preprocessed_path = excel_to_txt(
-                                preprocessed_excel_path, preprocessed_txt_file.name
-                            )
+                            try:
+                                preprocessed_path = excel_to_txt(
+                                    preprocessed_excel_path, preprocessed_txt_file.name
+                                )
+                                st.sidebar.success(
+                                    f"✅ 2단계 완료: {preprocessed_path}"
+                                )
+                                logger.info(f"Step 2 completed: {preprocessed_path}")
+                            except Exception as txt_error:
+                                error_msg = f"❌ TXT 변환 실패: {str(txt_error)}"
+                                st.sidebar.error(error_msg)
+                                st.sidebar.error(
+                                    f"🔍 TXT 변환 에러 상세: {traceback.format_exc()}"
+                                )
+                                logger.error(f"TXT conversion failed: {error_msg}")
+                                logger.error(
+                                    f"TXT conversion error traceback: {traceback.format_exc()}"
+                                )
+                                raise
 
                     st.sidebar.success("✅ 전처리 완료!")
                     st.session_state.preprocessed_path = preprocessed_path
+                    logger.info("Preprocessing completed successfully")
 
                     # 디버깅 정보 표시
                     st.sidebar.info(f"📁 전처리된 파일 경로: {preprocessed_path}")
+                    logger.info(f"Preprocessed file path: {preprocessed_path}")
 
                     # 전처리된 데이터 미리보기
                     try:
+                        st.sidebar.info("🔍 데이터 검증 중...")
+                        logger.info("Validating preprocessed data")
+
                         with open(preprocessed_path, "r", encoding="utf-8") as f:
                             lines = f.readlines()
                             st.sidebar.success(
                                 f"📊 전처리된 데이터 라인 수: {len(lines)}"
                             )
+                            logger.info(f"Preprocessed data lines: {len(lines)}")
+
                             if len(lines) > 0:
                                 # 첫 번째 라인을 JSON으로 파싱해서 키 확인
-                                first_item = json.loads(lines[0].strip())
-                                st.sidebar.info(
-                                    f"🔍 데이터 키들: {list(first_item.keys())}"
-                                )
+                                try:
+                                    first_item = json.loads(lines[0].strip())
+                                    st.sidebar.info(
+                                        f"🔍 데이터 키들: {list(first_item.keys())}"
+                                    )
+                                    logger.info(f"Data keys: {list(first_item.keys())}")
 
-                                # 샘플 데이터 일부 표시
-                                if len(lines) >= 3:
-                                    st.sidebar.info(f"📄 샘플 3줄 처리됨")
+                                    # 샘플 데이터 일부 표시
+                                    if len(lines) >= 3:
+                                        st.sidebar.info(f"📄 샘플 3줄 처리됨")
+                                        logger.info("Sample 3 lines processed")
+                                except json.JSONDecodeError as json_error:
+                                    error_msg = f"❌ JSON 파싱 실패: {str(json_error)}"
+                                    st.sidebar.error(error_msg)
+                                    st.sidebar.error(
+                                        f"🔍 첫 번째 라인: {lines[0][:200]}..."
+                                    )
+                                    logger.error(f"JSON parsing failed: {error_msg}")
+                                    logger.error(
+                                        f"First line preview: {lines[0][:200]}..."
+                                    )
+                            else:
+                                error_msg = "❌ 전처리된 파일이 비어있습니다"
+                                st.sidebar.error(error_msg)
+                                logger.error(error_msg)
+
                     except Exception as preview_error:
-                        st.sidebar.warning(
-                            f"⚠️  데이터 미리보기 실패: {str(preview_error)}"
+                        error_msg = f"⚠️ 데이터 미리보기 실패: {str(preview_error)}"
+                        st.sidebar.warning(error_msg)
+                        st.sidebar.error(
+                            f"🔍 미리보기 에러 상세: {traceback.format_exc()}"
+                        )
+                        logger.warning(f"Data preview failed: {error_msg}")
+                        logger.warning(
+                            f"Preview error traceback: {traceback.format_exc()}"
                         )
 
                 except Exception as e:
-                    st.sidebar.error(f"❌ 전처리 중 오류: {str(e)}")
-                    import traceback
+                    error_msg = f"❌ 전처리 중 전체적인 오류: {str(e)}"
+                    st.sidebar.error(error_msg)
+                    st.sidebar.error(f"🔍 전처리 전체 에러 상세:")
+                    st.sidebar.error(f"📄 에러 타입: {type(e).__name__}")
+                    st.sidebar.error(f"📄 에러 메시지: {str(e)}")
+                    st.sidebar.error(f"📄 상세 트레이스백:")
+                    st.sidebar.code(traceback.format_exc())
 
-                    st.sidebar.error(f"📄 상세 오류: {traceback.format_exc()}")
+                    logger.error(f"Overall preprocessing failed: {error_msg}")
+                    logger.error(f"Error type: {type(e).__name__}")
+                    logger.error(f"Error message: {str(e)}")
+                    logger.error(f"Full traceback: {traceback.format_exc()}")
 
         # 분석 실행
         st.sidebar.subheader("3. 분석 실행")
         if hasattr(st.session_state, "preprocessed_path") and st.sidebar.button(
             "분석 시작"
         ):
-            results, outlier_results = asyncio.run(
-                run_analysis(st.session_state.preprocessed_path)
-            )
+            try:
+                st.sidebar.info("🚀 분석 실행 시작...")
+                logger.info("Analysis execution started from button click")
 
-            if results is not None:
-                st.session_state.results = results
-                st.session_state.outlier_results = outlier_results
-                st.session_state.analysis_complete = True
+                # 파일 경로 검증
+                preprocessed_path = st.session_state.preprocessed_path
+                st.sidebar.info(f"📁 사용할 파일: {preprocessed_path}")
+                logger.info(f"Using file: {preprocessed_path}")
 
-                # 후처리 결과 필터링
-                if outlier_results and "pattern_result" in outlier_results[0]:
-                    filtered_results = []
-                    for item in outlier_results:
-                        pattern_result = item["pattern_result"]
-                        result_value = getattr(pattern_result, "result", None)
-                        if result_value is None and isinstance(pattern_result, dict):
-                            result_value = pattern_result.get("result")
-                        if result_value == "yes":
-                            filtered_results.append(item)
+                # 파일 존재 여부 확인
+                if not os.path.exists(preprocessed_path):
+                    error_msg = (
+                        f"❌ 전처리된 파일이 존재하지 않습니다: {preprocessed_path}"
+                    )
+                    st.sidebar.error(error_msg)
+                    logger.error(error_msg)
+                else:
+                    # 분석 실행
+                    results, outlier_results = asyncio.run(
+                        run_analysis(preprocessed_path)
+                    )
 
-                    st.session_state.post_processing_results = filtered_results
+                    if results is not None:
+                        st.session_state.results = results
+                        st.session_state.outlier_results = outlier_results
+                        st.session_state.analysis_complete = True
+
+                        st.sidebar.success("✅ 분석 실행 완료!")
+                        logger.info("Analysis execution completed successfully")
+
+                        # 후처리 결과 필터링
+                        if outlier_results and "pattern_result" in outlier_results[0]:
+                            try:
+                                filtered_results = []
+                                for item in outlier_results:
+                                    pattern_result = item["pattern_result"]
+                                    result_value = getattr(
+                                        pattern_result, "result", None
+                                    )
+                                    if result_value is None and isinstance(
+                                        pattern_result, dict
+                                    ):
+                                        result_value = pattern_result.get("result")
+                                    if result_value == "yes":
+                                        filtered_results.append(item)
+
+                                st.session_state.post_processing_results = (
+                                    filtered_results
+                                )
+                                logger.info(
+                                    f"Post-processing completed: {len(filtered_results)} final outliers"
+                                )
+
+                            except Exception as filter_error:
+                                error_msg = (
+                                    f"❌ 후처리 필터링 중 오류: {str(filter_error)}"
+                                )
+                                st.sidebar.error(error_msg)
+                                st.sidebar.error(
+                                    f"🔍 후처리 에러 상세: {traceback.format_exc()}"
+                                )
+                                logger.error(
+                                    f"Post-processing filtering failed: {error_msg}"
+                                )
+                                logger.error(
+                                    f"Post-processing error traceback: {traceback.format_exc()}"
+                                )
+                    else:
+                        error_msg = "❌ 분석 실행 중 결과를 얻지 못했습니다."
+                        st.sidebar.error(error_msg)
+                        logger.error(error_msg)
+
+            except Exception as analysis_start_error:
+                error_msg = (
+                    f"❌ 분석 시작 중 전체적인 오류: {str(analysis_start_error)}"
+                )
+                st.sidebar.error(error_msg)
+                st.sidebar.error(f"🔍 분석 시작 에러 상세:")
+                st.sidebar.error(f"📄 에러 타입: {type(analysis_start_error).__name__}")
+                st.sidebar.error(f"📄 에러 메시지: {str(analysis_start_error)}")
+                st.sidebar.error(f"📄 상세 트레이스백:")
+                st.sidebar.code(traceback.format_exc())
+
+                logger.error(f"Analysis start failed: {error_msg}")
+                logger.error(f"Error type: {type(analysis_start_error).__name__}")
+                logger.error(f"Error message: {str(analysis_start_error)}")
+                logger.error(f"Full traceback: {traceback.format_exc()}")
 
     # 메인 컨텐츠 영역
     if st.session_state.analysis_complete:

@@ -70,7 +70,7 @@ def show_debug_info():
             env_vars = ["AZURE_OPENAI_API_KEY", "PYTHONPATH", "PATH"]
             for var in env_vars:
                 value = os.environ.get(var, "❌ 설정되지 않음")
-                if var == "OPENAI_API_KEY" and value != "❌ 설정되지 않음":
+                if var == "AZURE_OPENAI_API_KEY" and value != "❌ 설정되지 않음":
                     value = f"✅ 설정됨 (길이: {len(value)})"
                 elif var in ["PYTHONPATH", "PATH"] and value != "❌ 설정되지 않음":
                     value = f"✅ 설정됨 (경로 수: {len(value.split(os.pathsep))})"

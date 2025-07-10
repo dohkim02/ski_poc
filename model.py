@@ -1,6 +1,7 @@
 import os
 import streamlit as st
-from dotenv import load_dotenv
+
+# from dotenv import load_dotenv
 from openai import AzureOpenAI
 from langchain_openai import AzureChatOpenAI
 

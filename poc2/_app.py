@@ -1197,17 +1197,17 @@ def main():
         for error in errors:
             st.error(error)
 
-        if "OPENAI_API_KEY" in " ".join(errors):
+        if "AZURE_OPENAI_API_KEY" in " ".join(errors):
             st.info(
                 """
             **🔧 해결 방법:**
             1. Streamlit Cloud의 앱 설정으로 이동
-            2. 'Secrets' 탭에서 OPENAI_API_KEY를 추가
+            2. 'Secrets' 탭에서 AZURE_OPENAI_API_KEY 추가
             3. 앱을 재시작
             
             **Secrets 설정 예시:**
             ```
-            OPENAI_API_KEY = "sk-your-api-key-here"
+            AZURE_OPENAI_API_KEY = "sk-your-api-key-here"
             ```
             """
             )

@@ -67,7 +67,7 @@ def show_debug_info():
                 st.code(f"{exists} {os.path.basename(file_path)}: {file_path}")
 
             st.write("**🌍 환경변수:**")
-            env_vars = ["OPENAI_API_KEY", "PYTHONPATH", "PATH"]
+            env_vars = ["AZURE_OPENAI_API_KEY", "PYTHONPATH", "PATH"]
             for var in env_vars:
                 value = os.environ.get(var, "❌ 설정되지 않음")
                 if var == "OPENAI_API_KEY" and value != "❌ 설정되지 않음":

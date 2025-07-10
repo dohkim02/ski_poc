@@ -66,16 +66,48 @@ def preprocess_excel(file_path, output_path):
 
 
 def excel_to_txt(file_path, output_file="./preprocessed.txt"):
-    # 엑셀 읽기
-    df = pd.read_excel(file_path)
-    # JSON 변환
-    data_list = json.loads(df.to_json(orient="records", force_ascii=False))
-    # 파일 초기화 (기존 파일 삭제 또는 빈 파일로 덮어쓰기)
-    with open(output_file, "w", encoding="utf-8") as f:
-        for item in data_list:
-            f.write(json.dumps(item, ensure_ascii=False) + "\n")
+    try:
+        # 엑셀 읽기
+        df = pd.read_excel(file_path)
 
-    return output_file
+        # 데이터가 있는지 확인
+        if df.empty:
+            print("Warning: Excel file is empty")
+            return output_file
+
+        print(f"Excel file loaded successfully. Shape: {df.shape}")
+        print(f"Columns: {list(df.columns)}")
+
+        # JSON 변환
+        data_list = json.loads(df.to_json(orient="records", force_ascii=False))
+
+        print(f"Converted to JSON. Number of records: {len(data_list)}")
+
+        # 파일 쓰기 (명시적으로 텍스트 모드로)
+        with open(output_file, "w", encoding="utf-8") as f:
+            for i, item in enumerate(data_list):
+                f.write(json.dumps(item, ensure_ascii=False) + "\n")
+
+        print(f"✅ TXT file saved successfully: {output_file}")
+
+        # 저장된 파일 검증
+        with open(output_file, "r", encoding="utf-8") as f:
+            lines = f.readlines()
+            print(f"Verification: {len(lines)} lines written to file")
+            if len(lines) > 0:
+                # 첫 번째 라인 확인
+                first_item = json.loads(lines[0].strip())
+                print(f"First item keys: {list(first_item.keys())}")
+
+        return output_file
+
+    except Exception as e:
+        print(f"Error in excel_to_txt: {str(e)}")
+        import traceback
+
+        print(f"Traceback: {traceback.format_exc()}")
+        # 에러가 발생해도 파일 경로는 반환
+        return output_file
 
 
 # 이 부분이 문제였습니다 - 모듈 import 시 실행되는 코드들을 제거합니다

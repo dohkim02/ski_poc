@@ -804,18 +804,50 @@ def main():
         if st.sidebar.button("전처리 실행"):
             with st.spinner("데이터를 전처리하는 중..."):
                 try:
-                    # 1단계: preprocess_excel 실행 (Excel → 전처리된 Excel)
-                    preprocessed_excel_path = "./preprocessed.xlsx"
-                    preprocess_excel(temp_excel_path, preprocessed_excel_path)
+                    # Streamlit Cloud 호환을 위해 모든 파일을 tempfile로 처리
+                    with tempfile.NamedTemporaryFile(
+                        delete=False, suffix=".xlsx"
+                    ) as preprocessed_excel_file:
+                        # 1단계: preprocess_excel 실행 (Excel → 전처리된 Excel)
+                        preprocess_excel(temp_excel_path, preprocessed_excel_file.name)
 
-                    # 2단계: excel_to_txt 실행 (전처리된 Excel → TXT)
-                    preprocessed_path = excel_to_txt(
-                        preprocessed_excel_path, "./preprocessed.txt"
-                    )
+                        # 2단계: excel_to_txt 실행 (전처리된 Excel → TXT)
+                        with tempfile.NamedTemporaryFile(
+                            delete=False, suffix=".txt", mode="w", encoding="utf-8"
+                        ) as preprocessed_txt_file:
+                            preprocessed_path = excel_to_txt(
+                                preprocessed_excel_file.name, preprocessed_txt_file.name
+                            )
+
                     st.sidebar.success("전처리 완료!")
                     st.session_state.preprocessed_path = preprocessed_path
+
+                    # 디버깅 정보 표시
+                    st.sidebar.info(f"전처리된 파일 경로: {preprocessed_path}")
+
+                    # 전처리된 데이터 미리보기
+                    try:
+                        with open(preprocessed_path, "r", encoding="utf-8") as f:
+                            lines = f.readlines()
+                            st.sidebar.success(f"전처리된 데이터 라인 수: {len(lines)}")
+                            if len(lines) > 0:
+                                # 첫 번째 라인을 JSON으로 파싱해서 키 확인
+                                import json
+
+                                first_item = json.loads(lines[0].strip())
+                                st.sidebar.info(
+                                    f"데이터 키들: {list(first_item.keys())}"
+                                )
+                    except Exception as preview_error:
+                        st.sidebar.warning(
+                            f"데이터 미리보기 실패: {str(preview_error)}"
+                        )
+
                 except Exception as e:
                     st.sidebar.error(f"전처리 중 오류: {str(e)}")
+                    import traceback
+
+                    st.sidebar.error(f"상세 오류: {traceback.format_exc()}")
 
         # 분석 실행
         st.sidebar.subheader("3. 분석 실행")

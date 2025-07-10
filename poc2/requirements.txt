@@ -10,3 +10,17 @@ tqdm>=4.65.0
 asyncio
 matplotlib>=3.7.0
 seaborn>=0.12.0 
+
+seaborn
+matplotlib
+pandas
+openpyxl
+scikit-learn
+pydantic
+langchain
+streamlit
+pydantic
+tqdm
+python-dotenv
+openai
+langchain_openai

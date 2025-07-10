@@ -24,8 +24,13 @@ def find_group_usage_combination(
     Returns:
         list: 매칭되는 인덱스들의 리스트
     """
-    groups = data["그룹"]
-    usages = data["용도"]
+    # 안전한 키 접근으로 변경
+    groups = data.get("그룹", {})
+    usages = data.get("용도", {})
+
+    # 키가 없으면 빈 리스트 반환
+    if not groups or not usages:
+        return []
 
     # 1. 그룹에서 target_group과 일치하는 인덱스들 찾기
     group_indices = []
@@ -42,7 +47,7 @@ def find_group_usage_combination(
     # 3. 등급이 지정된 경우 등급도 확인
     grade_indices = []
     if target_grade and "등급" in data:
-        grades = data["등급"]
+        grades = data.get("등급", {})
         for index, grade in grades.items():
             if grade == target_grade:
                 grade_indices.append(index)
@@ -50,7 +55,7 @@ def find_group_usage_combination(
     # 4. 압력_그룹이 지정된 경우 압력_그룹도 확인
     pressure_indices = []
     if target_pressure_group and "압력_그룹" in data:
-        pressure_groups = data["압력_그룹"]
+        pressure_groups = data.get("압력_그룹", {})
         for index, pressure_group in pressure_groups.items():
             if pressure_group == target_pressure_group:
                 pressure_indices.append(index)
@@ -100,15 +105,15 @@ def get_group_usage_info(
     for index in matching_indices:
         result_item = {
             "index": index,
-            "grade": data["등급"][index],
-            "group": data["그룹"][index],
-            "usage": data["용도"][index],
-            "data_num": data["데이터 개수"][index],
+            "grade": data.get("등급", {}).get(index, "A"),  # 기본값 A
+            "group": data.get("그룹", {}).get(index, "제조업"),  # 기본값 제조업
+            "usage": data.get("용도", {}).get(index, "일반용1"),  # 기본값 일반용1
+            "data_num": data.get("데이터 개수", {}).get(index, 0),  # 기본값 0
         }
 
         # 압력_그룹 정보가 있는 경우 추가
         if "압력_그룹" in data:
-            result_item["pressure_group"] = data["압력_그룹"][index]
+            result_item["pressure_group"] = data.get("압력_그룹", {}).get(index, "저압")
 
         results.append(result_item)
 
@@ -124,7 +129,9 @@ def get_group_usage_info(
 
     return {
         "category": category,
-        "standard": data["사용량 패턴 기준값"][results[0]["index"]],
+        "standard": data.get("사용량 패턴 기준값", {}).get(
+            results[0]["index"], {}
+        ),  # 안전한 접근
         "data_num": data_num,
     }
 

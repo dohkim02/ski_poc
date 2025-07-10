@@ -99,9 +99,10 @@ class Analyze:
         group_id = result.result
 
         category = category_lst[group_id]
-        grade = data["등급"]
-        usage = data["용도"]
-        pressure = data["압력_그룹"]
+        grade = data.get("등급", "A")  # 기본값 A
+        usage = data.get("용도", "일반용1")  # 기본값 일반용1
+        # 안전한 키 접근으로 변경
+        pressure = data.get("압력_그룹", "저압")  # 기본값을 "저압"으로 설정
 
         ground_truth = get_group_usage_info(
             self.ground_truth, grade, category, usage, pressure
@@ -271,19 +272,23 @@ class Analyze:
 
             # 'heat_input' 컬럼 생성 (보일러 열량 + 연소기 열량)
             df["category"] = ground_truth["category"]
-            # 기존 컬럼 삭제
-            df = df.drop(
-                ["업태", "업종", "용도", "등급"],
-                axis=1,
-            )
+            # 기존 컬럼 안전하게 삭제 (존재하는 컬럼만)
+            columns_to_drop = [
+                col for col in ["업태", "업종", "용도", "등급"] if col in df.columns
+            ]
+            if columns_to_drop:
+                df = df.drop(columns_to_drop, axis=1)
             # DataFrame을 다시 딕셔너리로 변환
             data = df.iloc[0].to_dict()
 
             # ground_truth = json.dumps(ground_truth, ensure_ascii=False)
             gt = ground_truth["standard"]
 
-            input_data = get_latest_6month(data["3년치 데이터"])
-            standard_data = {month: gt[month] for month in input_data.keys()}
+            # 안전한 키 접근으로 변경
+            years_data = data.get("3년치 데이터", {})
+            input_data = get_latest_6month(years_data)
+            # gt 딕셔너리에도 안전하게 접근
+            standard_data = {month: gt.get(month, 0) for month in input_data.keys()}
 
             if ground_truth["data_num"] > 100:
                 result = self.find_outlier(standard_data, input_data)
@@ -400,7 +405,8 @@ class Analyze:
 
                 # latest_6_month_data = outlier_item["comparison_input_data"]
                 standard = outlier_item["ground_truth"]["standard"]
-                years_data = outlier_item["input_data"]["3년치 데이터"]
+                # 안전한 키 접근으로 변경
+                years_data = outlier_item["input_data"].get("3년치 데이터", {})
 
                 # 안전한 데이터 변환
                 if isinstance(years_data, str):

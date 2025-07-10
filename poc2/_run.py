@@ -33,7 +33,8 @@ class Analyze:
         llm,
         ground_truth_path=os.path.join(
             os.path.dirname(__file__),
-            "./make_instruction/group_index.json",
+            "make_instruction",
+            "group_index.json",
         ),
     ):
         self.llm = llm

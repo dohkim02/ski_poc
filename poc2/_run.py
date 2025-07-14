@@ -154,9 +154,6 @@ class Analyze:
         ground_truth = get_group_usage_info(
             self.ground_truth, grade, category, usage, pressure
         )
-        import pdb
-
-        pdb.set_trace()
 
         # ground_truth가 문자열인 경우 (에러 메시지) 기본 딕셔너리 반환
         if isinstance(ground_truth, str):

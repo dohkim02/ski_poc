@@ -7,7 +7,7 @@ uploaded_data.txt
 __pycache__
 *.xlsx
 *.json
-!_biz_group_gt.json
+!group_index.json
 !_usage_gt.json
 *.csv
 *.jsonl
